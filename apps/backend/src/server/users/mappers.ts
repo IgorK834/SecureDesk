@@ -13,6 +13,29 @@ export interface SafeUser {
   updatedAt: Date;
 }
 
+/** The user fields shown to a signed-in user in login and `/me` responses. */
+export interface Profile {
+  id: string;
+  login: string;
+  firstName: string;
+  lastName: string;
+  /** The role code, e.g. `EMPLOYEE`. */
+  role: string;
+}
+
+/** Accepts a row or a SafeUser; copies fields by name, so nothing else can slip into a response. */
+export function toProfile(
+  user: Pick<SafeUser, 'id' | 'login' | 'firstName' | 'lastName' | 'roleId'>,
+): Profile {
+  return {
+    id: user.id,
+    login: user.login,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    role: user.roleId.toUpperCase(),
+  };
+}
+
 /**
  * Allowlist mapper: every field is copied by name, so a column added to `users` later (or any
  * stray property on the row) stays server-side until someone deliberately adds it here. A
