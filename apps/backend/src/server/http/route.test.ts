@@ -24,6 +24,14 @@ describe('errorResponse', () => {
     expect(response.headers.get('Retry-After')).toBe('30');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
+
+  it('adds `details` to the error only when there are some', async () => {
+    const response = errorResponse(400, 'C', 'm', undefined, { violations: ['TOO_SHORT'] });
+
+    expect(await response.json()).toStrictEqual({
+      error: { code: 'C', message: 'm', details: { violations: ['TOO_SHORT'] } },
+    });
+  });
 });
 
 describe('handleRoute', () => {
@@ -78,6 +86,26 @@ describe('handleRoute', () => {
     expect(JSON.parse(lines[0] ?? '')).toStrictEqual({
       event: 'test.route.denied',
       requestId: expect.any(String),
+    });
+  });
+
+  it('passes the details of an ApiError on to the client', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const route = handleRoute('test.route', () => {
+      throw new ApiError(400, 'PASSWORD_POLICY_VIOLATION', 'Komunikat', {
+        violations: ['TOO_SHORT'],
+      });
+    });
+
+    const response = await route(request());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toStrictEqual({
+      error: {
+        code: 'PASSWORD_POLICY_VIOLATION',
+        message: 'Komunikat',
+        details: { violations: ['TOO_SHORT'] },
+      },
     });
   });
 
