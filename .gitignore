@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output and caches
+.next/
+dist/
+.angular/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets and local configuration (only the placeholder template is tracked)
+.env*
+!.env.example
+
+# Database files must never be committed
+*.sqlite*
+*.db
+
+# Local scratch space
+.local/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
