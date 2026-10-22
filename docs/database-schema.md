@@ -1,6 +1,6 @@
 # Database Schema
 
-SecureDesk stores its data in SQLite through [Drizzle ORM](https://orm.drizzle.team). This document describes the persistence **pipeline** (Task 1.2). The table definitions are documented here once they are delivered in Task 1.3.
+SecureDesk stores its data in SQLite through [Drizzle ORM](https://orm.drizzle.team). This document describes the persistence **pipeline** (Task 1.2) and the **tables** (Task 1.3).
 
 ## Where things live
 
@@ -12,6 +12,7 @@ SecureDesk stores its data in SQLite through [Drizzle ORM](https://orm.drizzle.t
 | Connection factory       | `src/server/db/connection.ts`                            |
 | App singleton (`db`)     | `src/server/db/client.ts`                                |
 | Migration runner         | `src/server/db/migrate.ts`, CLI `scripts/migrate.ts`     |
+| Seed                     | `src/server/db/seeds/`, CLI `scripts/seed.ts`            |
 | Reset                    | `src/server/db/reset.ts`, CLI `scripts/reset-db.ts`      |
 | Constraint error mapping | `src/server/db/errors.ts`                                |
 | Database files           | `data/` (git-ignored)                                    |
@@ -88,6 +89,131 @@ Drizzle can wrap the driver error and put the SQLite code on `cause`, so the who
 
 `ReferenceError` deliberately keeps the name from the backlog, but it shadows the JavaScript global of the same name in any module that imports it. Import it under an alias (`import { ReferenceError as DbReferenceError }`) if the global is also needed.
 
+## Seeding
+
+```bash
+npm run db:migrate && npm run db:seed        # development database
+npm run db:seed:test                         # test database (NODE_ENV=test)
+```
+
+The seed (`src/server/db/seeds/`, entry point `scripts/seed.ts`) creates, in one transaction:
+
+| What                | Content                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Roles               | Administrator, Manager (Kierownik), Employee (Pracownik), Guest (Gość), with stable ids from `ROLES`                    |
+| Permissions         | the 15 codes of `PERMISSIONS`, linked to roles by the matrix in `src/server/permissions/matrix.ts` (21 links)           |
+| `security_settings` | the single row: minimum length 12, personal-data rule off, expiry disabled, idle timeout 15 minutes                     |
+| Accounts            | `ADMIN` (Administrator, System Administrator) plus `manager1`, `manager2`, `employee1`, `employee2`, `guest1`, `guest2` |
+
+Rules:
+
+- **Idempotent.** Roles, permissions, links and settings are inserted with `ON CONFLICT DO NOTHING`. An account that already exists (matched by `login_normalized`) is skipped: no password is generated for it and its `password_hash` is never read or changed, so re-running cannot overwrite a real credential. Because it only adds, a re-run also does not remove permissions that were dropped from the matrix.
+- **No stored secret.** The repository contains no password. Each new account gets a fresh `generateTemporaryPassword()` value (16 characters, CSPRNG) hashed with `hashPassword()` (Argon2id). Two seeds therefore never produce the same password or hash.
+- **First login.** Every seeded account has `must_change_password = 1`. The six test users also get `temporary_password_expires_at` = creation time + 12 hours.
+- **Delivery.** The plaintext of newly created accounts is appended to `apps/backend/.local/initial-credentials.txt` (git-ignored; directory `0700`, file `0600`). The seed prints that path and counts, never a password or hash. Delete the file once the passwords are changed. With `NODE_ENV=test` nothing is written to disk; `seedDatabase(db)` returns the passwords to the calling test.
+- **Failure.** The credentials directory is created before any account, so a permission problem aborts the run first. A failing run prints only the error message, and a test asserts that a failing insert never prints a hash or SQL, so a Drizzle upgrade that starts adding statements or parameters to error messages fails that test instead of leaking hashes to the console.
+
+### ADMIN does not lapse after 12 hours
+
+`ADMIN` is the one account no other administrator can reset, so its initial password has `temporary_password_expires_at = NULL`: it stays valid until ADMIN changes it, which is still forced at first login (`must_change_password = 1`). The login flow (Task 2.x) must therefore treat `must_change_password = 1` with a `NULL` expiry as "valid initial password, no deadline". The 12-hour rule remains mandatory for credentials issued through the admin panel (create user, reset password). If the credentials file is lost before the first login, there is no in-app recovery for ADMIN: run `npm run db:reset:dev && npm run db:migrate && npm run db:seed` on the development database.
+
+This seed creates six test accounts and is meant for development and review databases. A production bootstrap that creates only `ADMIN` is not part of this task.
+
 ## Tables
 
-_Delivered in Task 1.3._
+Seven tables hold identity, authorization and session state. The `tickets` table is added in Task 3.3. Types below are SQLite storage classes: "boolean" columns hold `0`/`1`, and every timestamp is an `INTEGER` of **UTC epoch milliseconds** (`integer(..., { mode: 'timestamp_ms' })` in Drizzle).
+
+```mermaid
+erDiagram
+    roles ||--o{ users : "role_id"
+    roles ||--o{ role_permissions : "role_id"
+    permissions ||--o{ role_permissions : "permission_id"
+    users ||--o{ password_history : "user_id"
+    users ||--o{ sessions : "user_id"
+    users |o--o{ security_settings : "updated_by"
+
+    roles {
+        TEXT id PK "stable key, e.g. manager"
+        TEXT name UK
+        TEXT description
+    }
+
+    permissions {
+        TEXT id PK "equals code"
+        TEXT code UK "e.g. users:read"
+        TEXT description
+    }
+
+    role_permissions {
+        TEXT role_id PK, FK
+        TEXT permission_id PK, FK
+    }
+
+    users {
+        TEXT id PK "UUID"
+        TEXT login "spelling as created"
+        TEXT login_normalized UK "NFKC + lowercase"
+        TEXT first_name
+        TEXT last_name
+        TEXT role_id FK "NOT NULL, one role per user"
+        TEXT password_hash "Argon2id, never plaintext"
+        INTEGER must_change_password "boolean"
+        INTEGER temporary_password_expires_at "nullable timestamp"
+        INTEGER password_changed_at "nullable timestamp"
+        INTEGER is_blocked "boolean, default 0"
+        INTEGER deleted_at "nullable timestamp, soft delete"
+        INTEGER created_at "timestamp"
+        INTEGER updated_at "timestamp"
+    }
+
+    password_history {
+        TEXT id PK "UUID"
+        TEXT user_id FK
+        TEXT password_hash "Argon2id, never plaintext"
+        INTEGER created_at "timestamp"
+    }
+
+    sessions {
+        TEXT id PK "UUID"
+        TEXT user_id FK
+        TEXT token_hash UK "digest, never the raw token"
+        INTEGER created_at "timestamp"
+        INTEGER last_activity_at "timestamp"
+        INTEGER expires_at "timestamp"
+        INTEGER revoked_at "nullable timestamp"
+        TEXT auth_stage "CHECK: INITIAL_PASSWORD_CHANGE, PASSWORD_EXPIRED, FULLY_AUTHENTICATED"
+    }
+
+    security_settings {
+        INTEGER id PK "CHECK id = 1 (single row)"
+        INTEGER min_password_length "default 12, CHECK >= 12"
+        INTEGER reject_personal_data_in_password "boolean, default 0"
+        INTEGER password_max_age_days "nullable, NULL = disabled"
+        INTEGER session_idle_timeout_minutes "default 15"
+        INTEGER updated_at "timestamp"
+        TEXT updated_by FK "nullable"
+    }
+```
+
+A test (`schema/er-diagram.test.ts`) migrates an empty database and fails if this diagram disagrees with it about tables, columns, types, primary keys, unique columns or foreign keys, so the diagram cannot silently go stale.
+
+### Invariants and where they are enforced
+
+| Invariant                                            | Enforced by                                                                                                                                  |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exactly one role per user                            | `users.role_id` is `NOT NULL` with a foreign key to `roles.id`                                                                               |
+| A login is unique regardless of case or Unicode      | unique index on `users.login_normalized`, always filled with `normalizeLogin()` (`src/server/users/login.ts`)                                |
+| Credentials are stored as hashes only                | the only credential columns are `users.password_hash`, `password_history.password_hash` and `sessions.token_hash`; a test fails on any other |
+| A session has one of three known auth stages         | `CHECK` on `sessions.auth_stage`                                                                                                             |
+| Sessions can be revoked without deleting them        | `sessions.revoked_at`                                                                                                                        |
+| One settings row; minimum password length never < 12 | `CHECK (id = 1)` and `CHECK (min_password_length >= 12)` on `security_settings`                                                              |
+| The permanent `ADMIN` account is protected           | triggers from migration `0001_protect_admin_account` (below) plus the service-layer checks of Task 4.3                                       |
+| Accounts are never hard-deleted by the application   | soft delete through `users.deleted_at`; foreign keys from sessions and history keep pointing at a real row                                   |
+
+### Notes
+
+- **IDs.** `users`, `sessions` and `password_history` use UUIDs generated by the application. `roles.id` and `permissions.id` are stable keys (a role's id is its `ROLES` value, a permission's id is its code), so they are identical in every database and the seed can be re-run safely.
+- **Login reservation.** `login_normalized` is unique across _all_ rows, including soft-deleted ones, so a deleted login cannot be re-registered by someone else.
+- **Settings.** `updated_by` is `NULL` while the row still holds the seeded defaults.
+- **Time.** Row timestamps default to `clock.now()` (`src/server/time/clock.ts`), so tests that replace the clock also control `created_at`/`updated_at`.
+- **ADMIN triggers.** Migration `0001_protect_admin_account` was created with `drizzle-kit generate --custom` (the supported way to ship raw SQL; Drizzle does not model triggers). For the row where `login_normalized = 'admin'` it rejects `DELETE` and any `UPDATE` that changes `login`/`login_normalized` or `role_id`, sets `is_blocked` to non-zero, or sets `deleted_at`. Other columns, such as `password_hash`, stay writable. A trigger violation is reported by SQLite as `SQLITE_CONSTRAINT_TRIGGER`, which `mapDbError` deliberately does not translate: services must check the rule first and return their own error.

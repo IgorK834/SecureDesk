@@ -94,8 +94,11 @@ npm run db:migrate        # apply pending migrations to the dev database (create
 npm run db:generate       # create a new migration after editing the schema
 npm run db:reset:dev      # delete the dev database file (and -wal/-shm), then re-run db:migrate
 npm run db:reset:test     # same for the test database
-npm run db:seed           # placeholder until Task 1.4
+npm run db:seed           # seed roles, permissions, settings, ADMIN and six test users (idempotent)
+npm run db:seed:test      # same, against the test database (no passwords are written to disk)
 ```
+
+`db:seed` generates a fresh random temporary password for each account it creates and writes them, owner-readable only, to `apps/backend/.local/initial-credentials.txt` (git-ignored). The terminal shows the file path, never the passwords. Every seeded account must change its password at first login. See [Seeding](docs/database-schema.md#seeding).
 
 The `db:reset:*` scripts set `NODE_ENV` inline, so they need a POSIX shell (macOS, Linux, WSL). The database files live in the git-ignored `apps/backend/data/` directory. Details and rules: [docs/database-schema.md](docs/database-schema.md).
 
