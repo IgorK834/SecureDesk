@@ -25,3 +25,6 @@ export function createDb(dbPath: string) {
 }
 
 export type AppDb = ReturnType<typeof createDb>;
+
+/** The `tx` handed to the callback of `db.transaction()`. */
+export type AppTransaction = Parameters<Parameters<AppDb['transaction']>[0]>[0];
