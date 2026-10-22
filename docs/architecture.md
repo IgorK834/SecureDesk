@@ -115,14 +115,116 @@ These exist so login works end to end and are to be replaced or confirmed by lat
 
 | Part                | Current stand-in                                                    | Owner    |
 | ------------------- | ------------------------------------------------------------------- | -------- |
-| Session service     | `server/auth/session-service.ts`: create session, session cookie    | Task 2.3 |
-| Session lifetime    | 8 hours absolute (`SESSION_LIFETIME_MS`); idle timeout not yet used | Task 2.3 |
-| Session cookie      | `__Host-securedesk_session`, HttpOnly, Secure, SameSite=Lax, Path=/ | Task 2.3 |
-| Route wrapper       | helpers local to `route.ts` (error shape, `no-store`, 500 mapping)  | Task 3.2 |
+| Route wrapper       | `server/http/route.ts` (`handleRoute`, `ApiError`, `errorResponse`) | Task 3.2 |
 | Rate limiter        | `loginRateLimiter` allows everything                                | Task 6.1 |
 | Rate-limiter client | first `X-Forwarded-For` entry if `TRUST_PROXY=true`, else `unknown` | Task 6.1 |
 | Request body limit  | none yet: the body is read in full before validation                | SD-27    |
+| CSRF protection     | none yet; `POST /api/auth/logout` relies on SameSite=Lax alone      | SD-27    |
 
-The cookie is Secure (and uses the `__Host-` prefix, which requires HTTPS) unless `COOKIE_SECURE`
-is exactly `false`, so a missing or mistyped variable fails safe. Only a SHA-256 digest of the
-256-bit random session token is stored.
+## Sessions
+
+Opaque, server-side and revocable. A session is a row in `sessions`; the browser only holds a
+random token that points at it. Code: `server/auth/session-service.ts` (rules),
+`server/auth/cookie.ts` (cookie), `server/auth/guards.ts` (what a route calls).
+
+### Token and cookie
+
+The token is 32 bytes from `crypto.randomBytes`, base64url, always 43 characters. Only its SHA-256
+digest is stored (`sessions.token_hash`), so a copy of the database cannot be replayed as a cookie
+and the token never appears in the database file, its write-ahead log, a log line or a response
+body. It travels only in the cookie:
+
+| Attribute | Value                                                                                |
+| --------- | ------------------------------------------------------------------------------------ |
+| Name      | `__Host-sd_session` over HTTPS, `sd_session` when `COOKIE_SECURE=false` (dev only)   |
+| HttpOnly  | always: page scripts cannot read it                                                  |
+| Secure    | unless `COOKIE_SECURE` is exactly `false`, so a missing or mistyped value fails safe |
+| SameSite  | `Lax`                                                                                |
+| Path      | `/`; no `Domain`, so it is host-only                                                 |
+| Expires   | the session's absolute end; logout sends `Max-Age=0`                                 |
+
+The `__Host-` prefix makes browsers insist on Secure, `Path=/` and no `Domain`, and prevents a
+sibling subdomain from planting a cookie of that name. Over HTTPS the plain name is therefore
+ignored. The Angular app never sees the token and must not copy it anywhere:
+`tests/no-token-in-browser-storage.test.ts` fails if the frontend source uses `localStorage`,
+`sessionStorage`, `indexedDB` or `document.cookie`.
+
+### Lifetime
+
+| Rule     | Value                                                                                |
+| -------- | ------------------------------------------------------------------------------------ |
+| Absolute | 12 hours from login however active the session is (`SESSION_ABSOLUTE_LIFETIME_MS`)   |
+| Idle     | `security_settings.session_idle_timeout_minutes` (default 15), read on every request |
+
+Both limits are inclusive: a session is dead from exactly 12 hours, or exactly the idle timeout,
+after the reference time. The idle timeout is read from the database on every request, so an
+administrator's change applies to sessions that are already open. A session found expired, or
+belonging to a blocked or deleted user, is **revoked on the spot**, so it cannot come back to life
+when the user is unblocked or the timeout is raised.
+
+Inactivity runs from the last request that was **admitted**: authenticated, in an allowed stage and
+holding any required permission. A refused request never extends a session, so an old cookie
+cannot be kept alive by hammering an endpoint it may not use. Every admitted request counts,
+including `GET /api/auth/me`: the Angular app calls it once at start-up and must not poll it.
+
+### Guards
+
+A route calls a guard, wrapped in `handleRoute` (`server/http/route.ts`), which turns the thrown
+`ApiError` into the response. The guard returns the session, the user and the role's permissions.
+
+| Guard                                | Admits                                                           |
+| ------------------------------------ | ---------------------------------------------------------------- |
+| `requireSession(request)`            | any signed-in session, including one that owes a password change |
+| `requireFullSession(request)`        | `FULLY_AUTHENTICATED` only: the default for business endpoints   |
+| `requireStage(request, [stages...])` | exactly the listed stages (for the password-change endpoints)    |
+
+Each takes an optional `{ permission }`. Refusals:
+
+| Status | `error.code`                    | When                                                                               |
+| ------ | ------------------------------- | ---------------------------------------------------------------------------------- |
+| 401    | `AUTH_REQUIRED`                 | No cookie, malformed, unknown, revoked or expired: one byte-identical body         |
+| 403    | `AUTH_PASSWORD_CHANGE_REQUIRED` | A session that still owes a password change calls anything not open to it          |
+| 403    | `AUTH_FORBIDDEN`                | The role lacks the permission, or a full session calls a restricted-stage endpoint |
+
+### Endpoints
+
+- `GET /api/auth/me`: open to every stage. Returns `{ user, authStage, mustChangePassword,
+permissions }` (`user` is the same five fields as the login response). `mustChangePassword` is the
+  account flag, as in the login response; clients should decide from `authStage`, which also covers
+  an expired password.
+- `POST /api/auth/logout`: open to every stage, so a user who must change the password can still
+  sign out. Revokes the caller's session only (other devices stay signed in), clears the cookie and
+  answers `204`. Without a valid session it answers `401`, not a silent success.
+
+### Operations for other tasks
+
+`revokeAllForUser(db, userId, { exceptSessionId? })` ends every live session (use it on password
+change, block, delete and administrator reset). `rotateSession(db, session, stage)` replaces a
+session with a fresh token and a new stage in one transaction (use it when privileges change, for
+example after the forced password change). Login itself revokes a token the request already carried
+(session fixation).
+
+## Temporary passwords (variant 2)
+
+`server/auth/temporary-password.ts`. Account creation, administrator reset and the seed all issue
+credentials through it.
+
+- **Shape.** Exactly 16 characters from letters, digits and `!@#$%^&*()-_=+[]{}?`, with at least
+  one of each group: one guaranteed character per group, the rest from the combined pool, then a
+  Fisher-Yates shuffle, everything via `crypto.randomInt` (a CSPRNG, free of modulo bias). The
+  guaranteed characters therefore do not sit at fixed positions.
+- **Lifetime.** Valid for exactly 12 hours from issue: usable at +11 h 59 min 59.999 s, expired from
+  exactly +12 h (`isTemporaryPasswordExpired`). The time is read before hashing, so slow hashing can
+  only shorten the window.
+- **One time, never stored.** `issueTemporaryCredential(clock)` returns `{ plaintext, hash,
+expiresAt }`. The plaintext is shown once to the administrator in a `Cache-Control: no-store`
+  response and never logged, stored, put in a URL or sent to analytics; only the Argon2id hash is
+  kept, so another administrator cannot read it back later.
+- **Applying it.** `applyTemporaryCredential(tx, userId, credential)` sets `password_hash`,
+  `must_change_password = 1`, `temporary_password_expires_at` and `updated_at`, and throws if the
+  user does not exist. It does not end the user's sessions: a caller resetting an existing account
+  should call `revokeAllForUser` in the same transaction.
+- **Randomness is enforced.** ESLint bans `Math.random` under `apps/backend/src/server/**`;
+  `tests/eslint-no-math-random.test.ts` fails if that rule is removed or narrowed.
+- **Testing time.** `tests/helpers/fake-clock.ts` provides a `FakeClock` that tests install
+  (`setClockForTests`) and move with `advance()` / `set()`, so expiry boundaries are exact.
