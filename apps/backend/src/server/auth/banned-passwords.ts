@@ -1,0 +1,58 @@
+/**
+ * A small local list of very common passwords of 12 or more characters, the length the policy
+ * already demands, so each entry is a password that would otherwise pass. It is a baseline
+ * safeguard, not a breach-database check (no external service is called).
+ *
+ * Every entry is stored in the form `validateNewPassword` compares in: NFKC-normalized and
+ * lower-case. A candidate is refused when its normalized form is exactly one of these.
+ */
+export const BANNED_PASSWORDS: ReadonlySet<string> = new Set([
+  '123456789012',
+  '1234567890123',
+  '12345678901234',
+  '111111111111',
+  '000000000000',
+  'abcdefghijkl',
+  'abcd12345678',
+  'qwertyuiop12',
+  'qwertyuiop123',
+  'qwertyqwerty',
+  'qwerty123456',
+  'qwerty1234567',
+  'asdfghjkl123',
+  'asdfghjklqwerty',
+  'zxcvbnm12345',
+  'qazwsxedcrfv',
+  '1qaz2wsx3edc',
+  '1q2w3e4r5t6y',
+  'password1234',
+  'password12345',
+  'password123456',
+  'passwordpassword',
+  'passw0rd1234',
+  'p@ssw0rd1234',
+  'p@ssword1234',
+  'iloveyou1234',
+  'iloveyou12345',
+  'letmein12345',
+  'letmeinletmein',
+  'welcome12345',
+  'welcomewelcome',
+  'changeme1234',
+  'administrator',
+  'administrator1',
+  'adminadmin123',
+  'secretsecret',
+  'correcthorsebatterystaple',
+  'football12345',
+  'baseball12345',
+  'monkey123456',
+  'dragon123456',
+  'sunshine1234',
+  'princess1234',
+  'haslo1234567',
+  'haslohaslo123',
+  'mojehaslo1234',
+  'securedesk123',
+  'securedesk1234',
+]);

@@ -5,27 +5,33 @@ import { randomUUID } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 import { logEvent } from '../security/log-event';
 
-/** An expected refusal: the status, machine-readable code and Polish message the client sees. */
+/**
+ * An expected refusal: the status, machine-readable code and Polish message the client sees.
+ * `details` is optional extra data for the client (for example the password rules that were
+ * broken); it must hold only fixed codes, never request content or anything read from the database.
+ */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-/** The standard error response. Never cacheable. */
+/** The standard error response, with `details` only when there are any. Never cacheable. */
 export function errorResponse(
   status: number,
   code: string,
   message: string,
   headers?: HeadersInit,
+  details?: Record<string, unknown>,
 ): NextResponse {
   return NextResponse.json(
-    { error: { code, message } },
+    { error: { code, message, ...(details && { details }) } },
     { status, headers: { 'Cache-Control': 'no-store', ...headers } },
   );
 }
@@ -47,7 +53,7 @@ export function handleRoute(
     } catch (error) {
       if (error instanceof ApiError) {
         logEvent(`${name}.denied`, requestId);
-        return errorResponse(error.status, error.code, error.message);
+        return errorResponse(error.status, error.code, error.message, undefined, error.details);
       }
       logEvent(`${name}.error`, requestId);
       return errorResponse(500, 'INTERNAL_ERROR', 'Wystąpił błąd serwera');
