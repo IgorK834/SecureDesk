@@ -1,4 +1,4 @@
-import { hashPassword } from '../../auth/password';
+import { hashPassword } from '../../auth/password-hasher';
 import {
   TEMPORARY_PASSWORD_TTL_MS,
   generateTemporaryPassword,
