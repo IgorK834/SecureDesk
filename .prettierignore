@@ -1,0 +1,9 @@
+node_modules/
+.next/
+dist/
+.angular/
+coverage/
+package-lock.json
+next-env.d.ts
+CLAUDE.md
+AGENTS.md
