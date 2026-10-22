@@ -119,7 +119,8 @@ These exist so login works end to end and are to be replaced or confirmed by lat
 | Rate limiter        | `loginRateLimiter` allows everything                                | Task 6.1 |
 | Rate-limiter client | first `X-Forwarded-For` entry if `TRUST_PROXY=true`, else `unknown` | Task 6.1 |
 | Request body limit  | none yet: the body is read in full before validation                | SD-27    |
-| CSRF protection     | none yet; `POST /api/auth/logout` relies on SameSite=Lax alone      | SD-27    |
+| CSRF protection     | none yet; logout and both password changes rely on SameSite=Lax     | SD-27    |
+| JSON body reading   | `server/http/json-body.ts`; the login route has its own copy        | Task 3.2 |
 
 ## Sessions
 
@@ -228,3 +229,88 @@ expiresAt }`. The plaintext is shown once to the administrator in a `Cache-Contr
   `tests/eslint-no-math-random.test.ts` fails if that rule is removed or narrowed.
 - **Testing time.** `tests/helpers/fake-clock.ts` provides a `FakeClock` that tests install
   (`setClockForTests`) and move with `advance()` / `set()`, so expiry boundaries are exact.
+
+## Password policy (variant 2)
+
+`server/auth/password-policy.ts`: `validateNewPassword(password, user, settings)` is the one pure
+function (no I/O) that decides whether a password a user chose is acceptable. Every flow that sets
+one goes through it on the server (`password-service.ts`), so a client that skips the Angular
+validation is refused all the same. It returns the list of violated rules, in a fixed order; an
+empty list means acceptable.
+
+| Violation                                                       | Rule                                                                                              |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `TOO_SHORT`                                                     | fewer than `max(12, security_settings.min_password_length)` characters                            |
+| `TOO_LONG`                                                      | more than 128 characters                                                                          |
+| `CONTAINS_LOGIN` / `CONTAINS_FIRST_NAME` / `CONTAINS_LAST_NAME` | only when `reject_personal_data_in_password` is on: the password contains that value, in any case |
+| `COMMON_PASSWORD`                                               | the password is one of the entries in `banned-passwords.ts`                                       |
+
+- **Length counts Unicode code points** (`Array.from(password).length`), not UTF-16 units or
+  grapheme clusters: 12 emoji are 12 characters. The upper bound is 128 code points, which is at
+  most 512 bytes in UTF-8, so one request cannot make the server hash an arbitrarily long input
+  and the hasher's 1024-byte limit is never reached. Spaces and any Unicode character are allowed;
+  the password is never trimmed.
+- **Comparison form.** Personal-data and banned-list checks compare `s.normalize('NFKC').toLowerCase()`
+  of both sides, so full-width letters and composed/decomposed accents match and letter case does
+  not matter. **Diacritics are not stripped**: the first name `Zoe` is not found inside `Zoë`. With
+  the first name `Anna`, `MyANNApassword2026!` is rejected. A profile value that is empty (or only
+  whitespace) is skipped, otherwise every password would match it.
+- **No composition rules.** There is no upper/lower-case, digit or symbol requirement for
+  user-chosen passwords (NIST SP 800-63B advises against them). The 16-character mix of letters,
+  digits and specials belongs to the temporary-password generator only.
+- **Banned list.** `banned-passwords.ts` holds a few dozen very common passwords of at least 12
+  characters, matched as a whole (not as a substring) after the same normalization. It is local:
+  no breach-database API is called.
+- **API mapping.** A violation becomes `400 PASSWORD_POLICY_VIOLATION` with
+  `error.details.violations` listing the codes above. The message is one generic text for every
+  violation and never contains profile data; the client turns the codes into specific wording.
+
+The settings come from `readSecuritySettings(db)`. Editing them is Task 4.5.
+
+## Changing passwords
+
+Two endpoints replace a password; both live in `server/auth/password-service.ts`.
+
+| Endpoint                                 | Admits (`requireStage`)                   | Body                                                   |
+| ---------------------------------------- | ----------------------------------------- | ------------------------------------------------------ |
+| `POST /api/auth/change-initial-password` | `INITIAL_PASSWORD_CHANGE` only            | `{ newPassword, confirmNewPassword }`                  |
+| `POST /api/auth/change-password`         | `FULLY_AUTHENTICATED`, `PASSWORD_EXPIRED` | `{ currentPassword, newPassword, confirmNewPassword }` |
+
+The body is strict JSON (`application/json` only) and is read only after the session is admitted.
+Success is `200 { user, authStage: "FULLY_AUTHENTICATED" }` with a **new** session cookie.
+
+**The restriction is in the session, not in Angular routing.** A session in `INITIAL_PASSWORD_CHANGE`
+or `PASSWORD_EXPIRED` is refused by every endpoint whose guard does not list its stage, with `403
+AUTH_PASSWORD_CHANGE_REQUIRED`. Business endpoints use `requireFullSession`; only `GET
+/api/auth/me`, `POST /api/auth/logout`, the endpoint of that stage (and, for an expired password,
+`change-password`) admit a restricted session. Until Task 3.2 introduces `defineRoute`, this rests
+on each route calling the right guard.
+
+- **One transaction, `BEGIN IMMEDIATE`.** The new hash (made before the transaction, because hashing
+  is asynchronous and a transaction is synchronous), the history update, the revocation of all of the
+  user's sessions and the new session succeed or fail together.
+- **Concurrent requests.** The `UPDATE` is guarded by the hash that was checked (and, for the initial
+  change, by `must_change_password = 1`); when it matches no row, the request gets `409
+PASSWORD_CHANGE_ALREADY_COMPLETED` and nothing is written. Two simultaneous requests with the
+  same session therefore produce exactly one `200` and one `409`.
+- **History.** `password_history` holds hashes of earlier _regular_ passwords. `assertNotReused`
+  verifies a candidate against the current hash and the five newest entries (`ORDER BY created_at DESC,
+id DESC LIMIT 5`; salts differ, so hashes cannot be compared). On an ordinary change the old hash
+  is added and the history is cut back to five rows in the same transaction. A temporary password
+  is never recorded, and it is refused as a new password because it is the current hash.
+- **Temporary-password deadline.** `changeInitialPassword` checks the 12-hour expiry again (a NULL
+  expiry means no deadline); an expired one revokes the session and answers `401
+AUTH_TEMPORARY_PASSWORD_EXPIRED`.
+
+| Status | `error.code`                        | When                                                                                                               |
+| ------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 400    | `VALIDATION_ERROR`                  | Wrong shape; or the two new passwords differ (`details.fieldErrors.confirmNewPassword` = `PASSWORDS_DO_NOT_MATCH`) |
+| 400    | `CURRENT_PASSWORD_INCORRECT`        | `change-password` only; refused before anything is written                                                         |
+| 400    | `PASSWORD_POLICY_VIOLATION`         | see [Password policy](#password-policy-variant-2)                                                                  |
+| 400    | `PASSWORD_REUSED`                   | equal to the current password or one of the five previous regular ones                                             |
+| 401    | `AUTH_TEMPORARY_PASSWORD_EXPIRED`   | `change-initial-password` after the 12-hour deadline; the session is revoked                                       |
+| 409    | `PASSWORD_CHANGE_ALREADY_COMPLETED` | the credential changed while the request was running                                                               |
+
+Both endpoints still need CSRF protection (SD-27, not built yet; see the table above). A wrong
+current password is not yet counted by a rate limiter: the placeholder limiter only knows login
+attempts (Task 6.1, marked `TODO` in `changePassword`).
