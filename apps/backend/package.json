@@ -13,7 +13,8 @@
     "db:reset:dev": "NODE_ENV=development tsx --env-file-if-exists=../../.env scripts/reset-db.ts",
     "db:reset:test": "NODE_ENV=test tsx --env-file-if-exists=../../.env scripts/reset-db.ts",
     "db:seed": "tsx --env-file-if-exists=../../.env scripts/seed.ts",
-    "db:seed:test": "NODE_ENV=test tsx --env-file-if-exists=../../.env scripts/seed.ts"
+    "db:seed:test": "NODE_ENV=test tsx --env-file-if-exists=../../.env scripts/seed.ts",
+    "bench:argon2": "tsx scripts/bench-argon2.ts"
   },
   "dependencies": {
     "@next/env": "16.4.2",
@@ -22,7 +23,8 @@
     "drizzle-orm": "^0.45.4",
     "next": "16.4.2",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
