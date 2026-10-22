@@ -1,11 +1,14 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { AppDb } from '../db/connection';
-import { type AuthStage, type UserRow, securitySettings, users } from '../db/schema';
+import { type AuthStage, type UserRow, users } from '../db/schema';
 import { loginRateLimiter } from '../security/login-rate-limiter';
+import { readSecuritySettings } from '../security/settings';
 import { clock } from '../time/clock';
 import { normalizeLogin } from '../users/login';
+import { type Profile, toProfile } from '../users/mappers';
 import { getDummyHash, verifyPassword } from './password-hasher';
-import { createSession } from './session-service';
+import { createSession, revokeSessionByToken } from './session-service';
+import { isTemporaryPasswordExpired } from './temporary-password';
 
 export interface LoginInput {
   login: string;
@@ -21,19 +24,10 @@ export interface LoginContext {
   presentedSessionToken?: string;
 }
 
-/** The only user fields a login response may contain. */
-export interface LoginUser {
-  id: string;
-  login: string;
-  firstName: string;
-  lastName: string;
-  role: string;
-}
-
 export type LoginResult =
   | {
       outcome: 'authenticated';
-      user: LoginUser;
+      user: Profile;
       authStage: AuthStage;
       mustChangePassword: boolean;
       session: { token: string; expiresAt: Date };
@@ -54,7 +48,7 @@ function authStageFor(user: UserRow, db: AppDb, now: Date): AuthStage {
   if (user.mustChangePassword) return 'INITIAL_PASSWORD_CHANGE';
 
   // A missing settings row means the defaults: password expiry disabled.
-  const maxAgeDays = db.select().from(securitySettings).get()?.passwordMaxAgeDays ?? null;
+  const { passwordMaxAgeDays: maxAgeDays } = readSecuritySettings(db);
   if (maxAgeDays === null) return 'FULLY_AUTHENTICATED';
 
   // No recorded change date while expiry is on cannot be proven fresh, so it counts as expired.
@@ -96,28 +90,23 @@ export async function authenticate(input: LoginInput, ctx: LoginContext): Promis
   const now = clock.now();
   // A NULL expiry means "no deadline" (the seeded ADMIN's bootstrap password).
   const expiry = user.temporaryPasswordExpiresAt;
-  if (user.mustChangePassword && expiry !== null && expiry.getTime() <= now.getTime()) {
+  if (user.mustChangePassword && expiry !== null && isTemporaryPasswordExpired(expiry, now)) {
     return INVALID_CREDENTIALS;
   }
 
   const authStage = authStageFor(user, ctx.db, now);
-  const session = createSession(ctx.db, {
-    userId: user.id,
-    authStage,
-    replacesToken: ctx.presentedSessionToken,
+  // A token the request already carried is revoked as the new session is created, in one
+  // transaction, so a token planted before login (session fixation) never gains the user's rights.
+  const created = ctx.db.transaction((tx) => {
+    if (ctx.presentedSessionToken) revokeSessionByToken(tx, ctx.presentedSessionToken);
+    return createSession(tx, user.id, authStage);
   });
 
   return {
     outcome: 'authenticated',
-    user: {
-      id: user.id,
-      login: user.login,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      role: user.roleId.toUpperCase(),
-    },
+    user: toProfile(user),
     authStage,
     mustChangePassword: user.mustChangePassword,
-    session,
+    session: { token: created.token, expiresAt: created.session.expiresAt },
   };
 }

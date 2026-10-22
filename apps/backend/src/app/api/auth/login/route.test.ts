@@ -1,15 +1,15 @@
 import { NextRequest } from 'next/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FakeClock } from '../../../../../../../tests/helpers/fake-clock';
 import { hashPassword } from '../../../../server/auth/password-hasher';
 import { hashSessionToken } from '../../../../server/auth/session-service';
 import { captureOutput } from '../../../../server/__fixtures__/capture-output';
+import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
 import { insertUser } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
-import { runMigrations } from '../../../../server/db/migrate';
 import { sessions, users } from '../../../../server/db/schema';
 import { seedDatabase } from '../../../../server/db/seeds';
 import { loginRateLimiter } from '../../../../server/security/login-rate-limiter';
-import { setClockForTests } from '../../../../server/time/clock';
 import { POST, dynamic, runtime } from './route';
 
 // These tests drive the real route handler against the real database wiring (an in-memory test
@@ -21,36 +21,27 @@ const HOUR_MS = 60 * 60 * 1000;
 const T0 = new Date('2026-03-10T12:00:00.000Z');
 const GENERIC_401 =
   '{"error":{"code":"AUTH_INVALID_CREDENTIALS","message":"Login lub hasło niepoprawne"}}';
-const COOKIE = '__Host-securedesk_session';
+const COOKIE = '__Host-sd_session';
 
 let passwordHash: string;
-let now: Date;
-
-const globalForDb = globalThis as typeof globalThis & { __securedeskDb?: unknown };
+const fakeClock = new FakeClock(T0);
 
 beforeAll(async () => {
   passwordHash = await hashPassword(PASSWORD);
 });
 
-// Every test gets its own empty database: the shared `db` opens lazily, so pointing it at memory
-// and dropping the cached connection is enough. (Rows cannot simply be deleted between tests:
-// the database itself refuses to delete the ADMIN account.)
+setUpSharedTestDb();
+
 beforeEach(() => {
-  vi.stubEnv('TEST_DATABASE_PATH', ':memory:');
-  delete globalForDb.__securedeskDb;
-  runMigrations(db);
-  now = T0;
-  setClockForTests({ now: () => now });
+  fakeClock.set(T0);
+  fakeClock.install();
   // The route logs one line per request; tests that inspect the log capture it themselves.
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
-  db.$client.close();
-  delete globalForDb.__securedeskDb;
-  setClockForTests();
+  fakeClock.uninstall();
   vi.restoreAllMocks();
-  vi.unstubAllEnvs();
 });
 
 function addUser(overrides: Partial<typeof users.$inferInsert> = {}) {
@@ -132,7 +123,7 @@ describe('POST /api/auth/login: success', () => {
 
     const [cookie] = response.headers.getSetCookie();
     const attributes = (cookie ?? '').split(';').map((part) => part.trim().toLowerCase());
-    expect(cookie).toMatch(/^securedesk_session=/);
+    expect(cookie).toMatch(/^sd_session=/);
     expect(attributes).not.toContain('secure');
     expect(attributes).toContain('httponly');
   });
@@ -198,12 +189,12 @@ describe('POST /api/auth/login: accounts created by the seed', () => {
     const employee = created.find((account) => account.login === 'employee1');
     if (!employee) throw new Error('employee1 was not seeded');
 
-    now = new Date(T0.getTime() + 11 * HOUR_MS + 59 * 60 * 1000);
+    fakeClock.set(new Date(T0.getTime() + 11 * HOUR_MS + 59 * 60 * 1000));
     const early = await loginAs('employee1', employee.password);
     expect(early.status).toBe(200);
     expect(await early.json()).toMatchObject({ authStage: 'INITIAL_PASSWORD_CHANGE' });
 
-    now = new Date(T0.getTime() + 12 * HOUR_MS);
+    fakeClock.set(new Date(T0.getTime() + 12 * HOUR_MS));
     const late = await loginAs('employee1', employee.password);
     expect(late.status).toBe(401);
     expect(await late.text()).toBe(GENERIC_401);
@@ -213,7 +204,7 @@ describe('POST /api/auth/login: accounts created by the seed', () => {
     const { created } = await seedDatabase(db);
     const admin = created.find((account) => account.login === 'ADMIN');
     if (!admin) throw new Error('ADMIN was not seeded');
-    now = new Date(T0.getTime() + 400 * 24 * HOUR_MS);
+    fakeClock.set(new Date(T0.getTime() + 400 * 24 * HOUR_MS));
 
     const response = await loginAs('admin', admin.password);
 
