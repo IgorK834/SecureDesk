@@ -1,8 +1,4 @@
-import { hashPassword } from '../../auth/password-hasher';
-import {
-  TEMPORARY_PASSWORD_TTL_MS,
-  generateTemporaryPassword,
-} from '../../auth/temporary-password';
+import { issueTemporaryCredential } from '../../auth/temporary-password';
 import { ROLES, type RoleId } from '../../permissions/codes';
 import { clock } from '../../time/clock';
 import { normalizeLogin } from '../../users/login';
@@ -43,6 +39,8 @@ export interface PreparedUser {
   /** Plaintext initial password. Exists only in memory; the database gets `passwordHash`. */
   password: string;
   passwordHash: string;
+  /** 12 hours after issue; stored for every account except ADMIN (see `insertUsers`). */
+  expiresAt: Date;
 }
 
 /**
@@ -63,8 +61,8 @@ export async function prepareNewUsers(db: AppDb): Promise<PreparedUser[]> {
   const prepared: PreparedUser[] = [];
   // One at a time: each hash needs 19 MiB, so this keeps peak memory flat.
   for (const user of SEED_USERS.filter((u) => !existing.has(normalizeLogin(u.login)))) {
-    const password = generateTemporaryPassword();
-    prepared.push({ user, password, passwordHash: await hashPassword(password) });
+    const { plaintext, hash, expiresAt } = await issueTemporaryCredential(clock);
+    prepared.push({ user, password: plaintext, passwordHash: hash, expiresAt });
   }
   return prepared;
 }
@@ -84,7 +82,7 @@ export function insertUsers(tx: AppTransaction, prepared: PreparedUser[]): Prepa
   const created: PreparedUser[] = [];
 
   for (const entry of prepared) {
-    const { user, passwordHash } = entry;
+    const { user, passwordHash, expiresAt } = entry;
     const inserted = tx
       .insert(users)
       .values({
@@ -95,8 +93,7 @@ export function insertUsers(tx: AppTransaction, prepared: PreparedUser[]): Prepa
         roleId: user.roleId,
         passwordHash,
         mustChangePassword: true,
-        temporaryPasswordExpiresAt:
-          user.login === ADMIN_LOGIN ? null : new Date(now.getTime() + TEMPORARY_PASSWORD_TTL_MS),
+        temporaryPasswordExpiresAt: user.login === ADMIN_LOGIN ? null : expiresAt,
         createdAt: now,
         updatedAt: now,
       })
