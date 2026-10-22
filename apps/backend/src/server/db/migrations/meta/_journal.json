@@ -1,1 +1,20 @@
-{ "version": "7", "dialect": "sqlite", "entries": [] }
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1792689551352,
+      "tag": "0000_core_identity_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792689557099,
+      "tag": "0001_protect_admin_account",
+      "breakpoints": true
+    }
+  ]
+}

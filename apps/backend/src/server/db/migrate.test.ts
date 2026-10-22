@@ -48,7 +48,7 @@ describe('runMigrations on an empty database', () => {
     expect(db.$client.pragma('foreign_key_check')).toEqual([]);
   });
 
-  it('runs the real (currently empty) migrations folder without error', () => {
+  it('runs the real migrations folder without error', () => {
     expect(() => runMigrations(connect())).not.toThrow();
   });
 });
