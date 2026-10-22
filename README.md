@@ -102,6 +102,16 @@ npm run db:seed:test      # same, against the test database (no passwords are wr
 
 The `db:reset:*` scripts set `NODE_ENV` inline, so they need a POSIX shell (macOS, Linux, WSL). The database files live in the git-ignored `apps/backend/data/` directory. Details and rules: [docs/database-schema.md](docs/database-schema.md).
 
+## Password hashing
+
+Passwords are stored only as Argon2id hashes, through one module (`apps/backend/src/server/auth/password-hasher.ts`). To measure what the configured parameters cost on your machine:
+
+```bash
+npm run bench:argon2 -w apps/backend -- 30    # 30 runs per operation
+```
+
+Parameters, measured times and the reasoning: [docs/architecture.md](docs/architecture.md#password-hashing).
+
 ## Architecture
 
 > Diagram derived from the SD-01 task description. Replace with the backlog's section 3.1 diagram if it differs.
