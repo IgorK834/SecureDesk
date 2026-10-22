@@ -12,10 +12,12 @@
     "db:migrate": "tsx --env-file-if-exists=../../.env scripts/migrate.ts",
     "db:reset:dev": "NODE_ENV=development tsx --env-file-if-exists=../../.env scripts/reset-db.ts",
     "db:reset:test": "NODE_ENV=test tsx --env-file-if-exists=../../.env scripts/reset-db.ts",
-    "db:seed": "node -e \"console.log('db:seed is a placeholder until Task 1.4 (seed data).')\""
+    "db:seed": "tsx --env-file-if-exists=../../.env scripts/seed.ts",
+    "db:seed:test": "NODE_ENV=test tsx --env-file-if-exists=../../.env scripts/seed.ts"
   },
   "dependencies": {
     "@next/env": "16.4.2",
+    "argon2": "^0.45.1",
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.4",
     "next": "16.4.2",

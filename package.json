@@ -21,7 +21,8 @@
     "db:migrate": "npm run db:migrate -w apps/backend",
     "db:reset:dev": "npm run db:reset:dev -w apps/backend",
     "db:reset:test": "npm run db:reset:test -w apps/backend",
-    "db:seed": "npm run db:seed -w apps/backend"
+    "db:seed": "npm run db:seed -w apps/backend",
+    "db:seed:test": "npm run db:seed:test -w apps/backend"
   },
   "overrides": {
     "@angular/build": {
