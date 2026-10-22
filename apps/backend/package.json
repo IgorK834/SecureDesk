@@ -8,18 +8,27 @@
     "start": "next start -p 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "node -e \"console.log('db:migrate is a placeholder until Task 1.2 (database schema and migrations).')\"",
+    "db:generate": "node --env-file-if-exists=../../.env ../../node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "tsx --env-file-if-exists=../../.env scripts/migrate.ts",
+    "db:reset:dev": "NODE_ENV=development tsx --env-file-if-exists=../../.env scripts/reset-db.ts",
+    "db:reset:test": "NODE_ENV=test tsx --env-file-if-exists=../../.env scripts/reset-db.ts",
     "db:seed": "node -e \"console.log('db:seed is a placeholder until Task 1.4 (seed data).')\""
   },
   "dependencies": {
+    "@next/env": "16.4.2",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.4",
     "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint-config-next": "16.4.2"
+    "drizzle-kit": "^0.31.11",
+    "eslint-config-next": "16.4.2",
+    "tsx": "^4.23.15"
   }
 }
