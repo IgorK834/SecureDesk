@@ -43,7 +43,7 @@ cp .env.example .env
 openssl rand -base64 32
 ```
 
-> The skeleton does not read `.env` yet. Variables start being consumed by the backend in the authentication and database tasks.
+> The backend reads this single root `.env` (Next.js via `next.config.ts`, the `db:*` scripts via `--env-file-if-exists`). Relative paths such as `DATABASE_PATH` are resolved from `apps/backend`.
 
 ## Run
 
@@ -85,14 +85,19 @@ npm test                  # vitest run --coverage
 
 Coverage uses V8 and **fails the run below 80%** for lines, statements, functions and branches (`vitest.config.ts`).
 
-## Database (placeholders)
+## Database
+
+SQLite via Drizzle ORM. The schema is only ever changed through versioned migrations, never by hand.
 
 ```bash
-npm run db:migrate
-npm run db:seed
+npm run db:migrate        # apply pending migrations to the dev database (creates the file)
+npm run db:generate       # create a new migration after editing the schema
+npm run db:reset:dev      # delete the dev database file (and -wal/-shm), then re-run db:migrate
+npm run db:reset:test     # same for the test database
+npm run db:seed           # placeholder until Task 1.4
 ```
 
-These currently only print a notice. They delegate to the backend workspace and gain real behaviour in Tasks 1.2 (schema/migrations) and 1.4 (seeds).
+The `db:reset:*` scripts set `NODE_ENV` inline, so they need a POSIX shell (macOS, Linux, WSL). The database files live in the git-ignored `apps/backend/data/` directory. Details and rules: [docs/database-schema.md](docs/database-schema.md).
 
 ## Architecture
 
