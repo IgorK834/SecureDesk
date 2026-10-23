@@ -5,6 +5,86 @@ import { PERMISSION_DESCRIPTIONS, ROLE_DEFINITIONS, ROLE_PERMISSIONS } from './m
 const can = (role: RoleId, permission: PermissionCode) =>
   ROLE_PERMISSIONS[role].includes(permission);
 
+const codesOf = (role: RoleId) => [...ROLE_PERMISSIONS[role]];
+const startingWith = (role: RoleId, ...prefixes: string[]) =>
+  codesOf(role).filter((code) => prefixes.some((prefix) => code.startsWith(prefix)));
+
+// The expected sets are typed out as plain strings on purpose: they do not go through
+// PERMISSIONS, so a wrong constant value, an added grant or a dropped grant makes these fail
+// instead of silently agreeing with itself. A change to the matrix must change this test too.
+describe('exact permission set of each role (backlog section 5, least privilege)', () => {
+  it('Administrator manages identities and security settings, and nothing else', () => {
+    expect(codesOf(ROLES.ADMINISTRATOR).sort()).toEqual(
+      [
+        'users:read',
+        'users:create',
+        'users:update',
+        'users:block',
+        'users:delete',
+        'users:reset-password',
+        'security-settings:read',
+        'security-settings:update',
+      ].sort(),
+    );
+  });
+
+  it('Manager coordinates tickets and has no say over accounts or settings', () => {
+    expect(codesOf(ROLES.MANAGER).sort()).toEqual(
+      [
+        'tickets:create',
+        'tickets:read:all',
+        'tickets:read:assigned',
+        'tickets:read:own',
+        'tickets:assign',
+        'tickets:status:update:all',
+        'tickets:status:update:assigned',
+      ].sort(),
+    );
+  });
+
+  it('Employee works on assigned and own tickets only', () => {
+    expect(codesOf(ROLES.EMPLOYEE).sort()).toEqual(
+      [
+        'tickets:create',
+        'tickets:read:assigned',
+        'tickets:read:own',
+        'tickets:status:update:assigned',
+      ].sort(),
+    );
+  });
+
+  it('Guest can only file a ticket and read their own', () => {
+    expect(codesOf(ROLES.GUEST).sort()).toEqual(['tickets:create', 'tickets:read:own'].sort());
+  });
+
+  it('Guest holds no code that starts with users: or security-settings:', () => {
+    expect(startingWith(ROLES.GUEST, 'users:', 'security-settings:')).toEqual([]);
+  });
+
+  it('Employee cannot assign tickets', () => {
+    expect(codesOf(ROLES.EMPLOYEE)).not.toContain('tickets:assign');
+  });
+
+  it('Manager holds no users:* code', () => {
+    expect(startingWith(ROLES.MANAGER, 'users:')).toEqual([]);
+  });
+
+  it('Administrator holds no tickets:* code, so the role alone never opens ticket content', () => {
+    expect(startingWith(ROLES.ADMINISTRATOR, 'tickets:')).toEqual([]);
+  });
+
+  it('grants nothing outside the 15 defined codes (a typo in the matrix would be caught here)', () => {
+    const defined = new Set<string>(Object.values(PERMISSIONS));
+
+    for (const role of Object.values(ROLES)) {
+      expect(
+        codesOf(role).filter((code) => !defined.has(code)),
+        role,
+      ).toEqual([]);
+    }
+  });
+});
+
 describe('role/permission matrix (backlog section 5)', () => {
   it.each([
     [ROLES.ADMINISTRATOR, 8],
