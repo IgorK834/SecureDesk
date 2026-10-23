@@ -64,5 +64,8 @@ export const UpdateUserBody = z
   .strict()
   .refine((body) => Object.keys(body).length > 0);
 
+/** A reset takes no input: the administrator does not choose the password, the server does. */
+export const ResetPasswordBody = z.object({}).strict();
+
 export type CreateUserInput = z.infer<typeof CreateUserBody>;
 export type UpdateUserInput = z.infer<typeof UpdateUserBody>;

@@ -1,5 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
+import { rememberPasswordHash } from '../auth/password-service';
 import { revokeAllForUser } from '../auth/session-service';
+import { applyTemporaryCredential, issueTemporaryCredential } from '../auth/temporary-password';
 import type { AppDb, AppTransaction } from '../db/connection';
 import { ADMIN_LOGIN } from '../db/seeds/users';
 import { users } from '../db/schema';
@@ -109,4 +111,46 @@ export function softDeleteUser(db: AppDb, id: string): void {
     },
     { behavior: 'immediate' },
   );
+}
+
+/** The new credential, to show to the administrator once; only its hash is stored. */
+export interface PasswordReset {
+  value: string;
+  expiresAt: Date;
+}
+
+/**
+ * Replaces the account's password with a fresh temporary one (16 characters, valid 12 hours),
+ * forces a regular password at next login and ends every session of the account, all in one
+ * transaction. The plaintext is returned and nowhere else: not stored, not logged.
+ *
+ * A regular password being replaced is filed under the account's password history first (cut back
+ * to the five newest), so the user cannot choose it again afterwards; a temporary one is not, as
+ * it was never chosen. `is_blocked` and `deleted_at` are not touched: resetting a blocked account
+ * does not unblock it, and a soft-deleted one cannot be reset (404).
+ *
+ * The credential is made before the transaction opens, because hashing is asynchronous and a
+ * better-sqlite3 transaction is not (the order `createUser` uses). The 12 hours therefore start
+ * at the call, and a reset of a missing account costs one hash it then discards.
+ */
+export async function resetPassword(db: AppDb, id: string): Promise<PasswordReset> {
+  const credential = await issueTemporaryCredential(clock);
+
+  db.transaction(
+    (tx) => {
+      const account = tx
+        .select({ passwordHash: users.passwordHash, mustChangePassword: users.mustChangePassword })
+        .from(users)
+        .where(and(eq(users.id, id), isNull(users.deletedAt)))
+        .get();
+      if (!account) throw new NotFoundError();
+
+      if (!account.mustChangePassword) rememberPasswordHash(tx, id, account.passwordHash);
+      applyTemporaryCredential(tx, id, credential);
+      revokeAllForUser(tx, id);
+    },
+    { behavior: 'immediate' },
+  );
+
+  return { value: credential.plaintext, expiresAt: credential.expiresAt };
 }

@@ -3,12 +3,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { type ApiClient, createApiClient } from '../../../../../../../tests/helpers/api-client';
 import { FakeClock } from '../../../../../../../tests/helpers/fake-clock';
 import { hashPassword, verifyPassword } from '../../../../server/auth/password-hasher';
+import { PASSWORD_HISTORY_SIZE } from '../../../../server/auth/password-service';
 import { hashSessionToken } from '../../../../server/auth/session-service';
 import {
   TEMP_PASSWORD_LENGTH,
   applyTemporaryCredential,
   issueTemporaryCredential,
 } from '../../../../server/auth/temporary-password';
+import { captureOutput } from '../../../../server/__fixtures__/capture-output';
 import { seedWorld, signInAs } from '../../../../server/db/__fixtures__/seeded-world';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
 import { insertUser } from '../../../../server/db/__fixtures__/test-db';
@@ -22,12 +24,15 @@ import {
 } from '../../../../server/db/schema';
 import { DEMO_TICKETS, seedTickets } from '../../../../server/db/seeds/tickets';
 import { PERMISSIONS, ROLES } from '../../../../server/permissions/codes';
+import { resetPassword } from '../../../../server/users/account-service';
 import { clock } from '../../../../server/time/clock';
+import * as changeInitialPasswordRoute from '../../auth/change-initial-password/route';
 import * as loginRoute from '../../auth/login/route';
 import * as meRoute from '../../auth/me/route';
 import * as ticketsRoute from '../../tickets/route';
 import * as userRoute from './[id]/route';
 import * as blockRoute from './[id]/block/route';
+import * as resetPasswordRoute from './[id]/reset-password/route';
 import * as unblockRoute from './[id]/unblock/route';
 import * as usersRoute from './route';
 
@@ -557,6 +562,25 @@ describe('POST /api/admin/users: what is created', () => {
     expect(list).not.toContain(temporaryPassword.value);
   });
 
+  // Nothing but the response may carry the password. The tests above look at the tables and at
+  // later reads; this is the one that would notice a log line added to the create path.
+  it('is in the response body once and nowhere else: not in a header, not in any log line', async () => {
+    const output = captureOutput();
+    let response: Response;
+    try {
+      response = await apiCreate(asUser('ADMIN'), NEW_USER);
+    } finally {
+      output.restore();
+    }
+    const raw = await response.clone().text();
+    const secret = (JSON.parse(raw) as { temporaryPassword: { value: string } }).temporaryPassword
+      .value;
+
+    expect(raw.split(secret)).toHaveLength(2);
+    expect([...response.headers.values()].some((value) => value.includes(secret))).toBe(false);
+    expect(output.lines().some((line) => line.includes(secret))).toBe(false);
+  });
+
   it('gives every account its own password', async () => {
     const admin = asUser('ADMIN');
     const first = await body(await apiCreate(admin, NEW_USER));
@@ -1066,6 +1090,9 @@ describe('POST /api/admin/users/[id]/block (SEC-18)', () => {
 
     await apiBlock(admin, ids.employee1 as string);
 
+    // Looked at before any request touches it: a request would revoke it lazily, because the
+    // account is blocked, and so hide a repeat that did nothing.
+    expect(sessionsAreRevoked(ids.employee1 as string)).toBe(true);
     expect((await apiMe(late)).status).toBe(401);
   });
 
@@ -1124,7 +1151,7 @@ describe('POST /api/admin/users/[id]/unblock', () => {
     const admin = asUser('ADMIN');
     await apiBlock(admin, ids.employee1 as string);
 
-    // What the (later) reset endpoint will do: issue a new temporary password for the account.
+    // What the reset endpoint does to the credential (the endpoint itself is tested below).
     const credential = await issueTemporaryCredential(clock);
     applyTemporaryCredential(db, ids.employee1 as string, credential);
 
@@ -1266,6 +1293,9 @@ describe('DELETE /api/admin/users/[id] (SEC-19)', () => {
 
     await apiDelete(admin, ids.employee2 as string);
 
+    // Looked at before any request touches it: a request would revoke it lazily, because the
+    // account is deleted, and so hide a repeat that did nothing.
+    expect(sessionsAreRevoked(ids.employee2 as string)).toBe(true);
     expect((await apiMe(late)).status).toBe(401);
   });
 
@@ -1350,5 +1380,511 @@ describe('block, unblock and delete: who may call them', () => {
     it('answers a malformed id with 400', async () => {
       expect((await call(asUser('ADMIN'), 'not-a-uuid')).status).toBe(400);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Resetting a password (SD-19)
+// ---------------------------------------------------------------------------------------------
+
+const MINUTE_MS = 60 * 1000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+const FRESH_PASSWORD = 'A brand new passphrase 1';
+
+const apiReset = (c: ApiClient, id: string, json: unknown = {}) =>
+  c.post(resetPasswordRoute, `/api/admin/users/${id}/reset-password`, { params: { id }, json });
+
+/** Signs in for real and keeps the client, so the cookie it received can be used afterwards. */
+const signIn = async (login: string, password: string) => {
+  const client = createApiClient();
+  const response = await client.post(loginRoute, '/api/auth/login', { json: { login, password } });
+  return { client, response };
+};
+
+const apiChooseFirstPassword = (c: ApiClient, newPassword: string) =>
+  c.post(changeInitialPasswordRoute, '/api/auth/change-initial-password', {
+    json: { newPassword, confirmNewPassword: newPassword },
+  });
+
+/** Resets as the Administrator, insists that it worked and returns what was handed out. */
+const resetAsAdmin = async (login: string) => {
+  const response = await apiReset(asUser('ADMIN'), ids[login] as string);
+  expect(response.status).toBe(200);
+  return (await body(response)).temporaryPassword as { value: string; expiresAt: string };
+};
+
+/** The account's remembered password hashes, oldest first. */
+const historyOf = (userId: string) =>
+  db
+    .select()
+    .from(passwordHistory)
+    .where(eq(passwordHistory.userId, userId))
+    .all()
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+/** Puts earlier regular passwords of the account into its history, the first being the oldest. */
+async function fillHistory(login: string, passwords: string[]) {
+  for (const [index, plaintext] of passwords.entries()) {
+    db.insert(passwordHistory)
+      .values({
+        userId: ids[login] as string,
+        passwordHash: await hashPassword(plaintext),
+        createdAt: new Date(T0.getTime() - (passwords.length - index) * DAY_MS),
+      })
+      .run();
+  }
+}
+
+describe('POST /api/admin/users/[id]/reset-password (SEC-20): the new password', () => {
+  beforeEach(() => givePassword('employee1'));
+
+  it('hands the Administrator one fresh temporary password, with its deadline, uncacheable', async () => {
+    const response = await apiReset(asUser('ADMIN'), ids.employee1 as string);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const result = await body(response);
+    expect(Object.keys(result)).toStrictEqual(['temporaryPassword']);
+    expect(Object.keys(result.temporaryPassword).sort()).toStrictEqual(['expiresAt', 'value']);
+    expect(TEMP_PASSWORD_LENGTH).toBe(16);
+    expect(result.temporaryPassword.value).toHaveLength(TEMP_PASSWORD_LENGTH);
+    expect(result.temporaryPassword.expiresAt).toBe(
+      new Date(T0.getTime() + TWELVE_HOURS_MS).toISOString(),
+    );
+  });
+
+  it('stores what it promised: a hash of that password, owed a change, with the same deadline', async () => {
+    expect(userRow(ids.employee1 as string)).toMatchObject({ mustChangePassword: false });
+
+    const temporary = await resetAsAdmin('employee1');
+
+    const row = userRow(ids.employee1 as string);
+    expect(row).toMatchObject({
+      mustChangePassword: true,
+      temporaryPasswordExpiresAt: new Date(T0.getTime() + TWELVE_HOURS_MS),
+    });
+    expect(row?.passwordHash).toMatch(/^\$argon2id\$/);
+    expect(await verifyPassword(row?.passwordHash as string, temporary.value)).toBe(true);
+  });
+
+  it('gives every reset a different password, and only the latest one works', async () => {
+    const first = await resetAsAdmin('employee1');
+    const second = await resetAsAdmin('employee1');
+
+    expect(second.value).not.toBe(first.value);
+    expect((await signIn('employee1', first.value)).response.status).toBe(401);
+    expect((await signIn('employee1', second.value)).response.status).toBe(200);
+  });
+
+  it('ends every live session of the account at once', async () => {
+    const laptop = asUser('employee1');
+    const phone = asUser('employee1');
+    expect((await apiMe(laptop)).status).toBe(200);
+    expect((await apiMe(phone)).status).toBe(200);
+
+    await resetAsAdmin('employee1');
+
+    // Looked at before any request touches them: a request would revoke them lazily, which would
+    // hide a reset that forgot to.
+    expect(sessionsAreRevoked(ids.employee1 as string)).toBe(true);
+    expect((await apiMe(laptop)).status).toBe(401);
+    expect((await apiMe(phone)).status).toBe(401);
+  });
+
+  it('retires the old password: it no longer signs in, the temporary one does', async () => {
+    expect((await signIn('employee1', PASSWORD)).response.status).toBe(200); // control
+
+    const temporary = await resetAsAdmin('employee1');
+    const old = await signIn('employee1', PASSWORD);
+    const fresh = await signIn('employee1', temporary.value);
+
+    expect(old.response.status).toBe(401);
+    expect(await old.response.text()).toBe(GENERIC_401);
+    expect(fresh.response.status).toBe(200);
+    expect(await body(fresh.response)).toMatchObject({
+      authStage: 'INITIAL_PASSWORD_CHANGE',
+      mustChangePassword: true,
+    });
+  });
+
+  it('sends the user through the initial-change flow, and nothing else is open to them meanwhile', async () => {
+    const temporary = await resetAsAdmin('employee1');
+    const { client } = await signIn('employee1', temporary.value);
+
+    const tickets = await client.get(ticketsRoute, '/api/tickets');
+    expect(tickets.status).toBe(403);
+    expect(await tickets.text()).toContain(PASSWORD_CHANGE);
+
+    const chosen = await apiChooseFirstPassword(client, FRESH_PASSWORD);
+    expect(chosen.status).toBe(200);
+    expect((await signIn('employee1', FRESH_PASSWORD)).response.status).toBe(200);
+    expect((await signIn('employee1', temporary.value)).response.status).toBe(401);
+  });
+
+  it.each([
+    ['at +11h59m', 200, 11 * 60 * MINUTE_MS + 59 * MINUTE_MS],
+    ['the last millisecond before the deadline', 200, TWELVE_HOURS_MS - 1],
+    ['exactly at the deadline (+12h)', 401, TWELVE_HOURS_MS],
+    ['a millisecond after the deadline', 401, TWELVE_HOURS_MS + 1],
+  ])('signing in %s is answered with %i', async (_when, status, afterMs) => {
+    const temporary = await resetAsAdmin('employee1');
+    fakeClock.set(new Date(T0.getTime() + afterMs));
+
+    const { response } = await signIn('employee1', temporary.value);
+
+    expect(response.status).toBe(status);
+    // Inside the window it is the initial-change flow that is owed, not a full session.
+    if (status === 200)
+      expect(await body(response)).toMatchObject({ authStage: 'INITIAL_PASSWORD_CHANGE' });
+  });
+
+  it('counts the 12 hours from the reset, not from when the account was created', async () => {
+    fakeClock.advance(30 * DAY_MS);
+    const temporary = await resetAsAdmin('employee1');
+    expect(temporary.expiresAt).toBe(
+      new Date(T0.getTime() + 30 * DAY_MS + TWELVE_HOURS_MS).toISOString(),
+    );
+    fakeClock.advance(TWELVE_HOURS_MS - 1);
+
+    expect((await signIn('employee1', temporary.value)).response.status).toBe(200);
+  });
+});
+
+describe('POST /api/admin/users/[id]/reset-password (SEC-20): the password history', () => {
+  beforeEach(() => givePassword('employee1'));
+
+  it('moves the password the account had into the history, so it cannot be chosen again', async () => {
+    const hadBefore = userRow(ids.employee1 as string)?.passwordHash;
+
+    const temporary = await resetAsAdmin('employee1');
+
+    expect(historyOf(ids.employee1 as string).map((h) => h.passwordHash)).toStrictEqual([
+      hadBefore,
+    ]);
+    const { client } = await signIn('employee1', temporary.value);
+    const reused = await apiChooseFirstPassword(client, PASSWORD);
+    expect(reused.status).toBe(400);
+    expect(await errorCode(reused)).toBe('PASSWORD_REUSED');
+    expect((await apiChooseFirstPassword(client, FRESH_PASSWORD)).status).toBe(200);
+  });
+
+  it('keeps the hashes that were already remembered: an older password stays unavailable', async () => {
+    await fillHistory('employee1', ['Older password number one 1', 'Older password number two 2']);
+    const remembered = historyOf(ids.employee1 as string).map((h) => h.passwordHash);
+    const hadBefore = userRow(ids.employee1 as string)?.passwordHash as string;
+
+    const temporary = await resetAsAdmin('employee1');
+
+    expect(historyOf(ids.employee1 as string).map((h) => h.passwordHash)).toStrictEqual([
+      ...remembered,
+      hadBefore,
+    ]);
+    const { client } = await signIn('employee1', temporary.value);
+    const reused = await apiChooseFirstPassword(client, 'Older password number one 1');
+    expect(await errorCode(reused)).toBe('PASSWORD_REUSED');
+  });
+
+  it('forgets only the oldest entry once there are more than five', async () => {
+    await fillHistory(
+      'employee1',
+      Array.from({ length: PASSWORD_HISTORY_SIZE }, (_, n) => `Earlier password number ${n} x`),
+    );
+    const remembered = historyOf(ids.employee1 as string).map((h) => h.passwordHash);
+    const hadBefore = userRow(ids.employee1 as string)?.passwordHash as string;
+    expect(remembered).toHaveLength(PASSWORD_HISTORY_SIZE);
+
+    await resetAsAdmin('employee1');
+
+    expect(historyOf(ids.employee1 as string).map((h) => h.passwordHash)).toStrictEqual([
+      ...remembered.slice(1),
+      hadBefore,
+    ]);
+  });
+
+  it('never files a temporary password: resetting twice remembers only the real one', async () => {
+    const hadBefore = userRow(ids.employee1 as string)?.passwordHash;
+
+    await resetAsAdmin('employee1');
+    await resetAsAdmin('employee1'); // the account now holds a temporary password
+
+    expect(historyOf(ids.employee1 as string).map((h) => h.passwordHash)).toStrictEqual([
+      hadBefore,
+    ]);
+  });
+
+  it('files nothing for an account whose password was never anything but temporary', async () => {
+    const pending = await issueTemporaryCredential(clock);
+    applyTemporaryCredential(db, ids.employee1 as string, pending);
+
+    await resetAsAdmin('employee1');
+
+    expect(historyOf(ids.employee1 as string)).toHaveLength(0);
+  });
+
+  it('leaves the history of every other account alone', async () => {
+    await fillHistory('employee2', ['Employee two earlier one 1']);
+    const before = historyOf(ids.employee2 as string);
+
+    await resetAsAdmin('employee1');
+
+    expect(historyOf(ids.employee2 as string)).toStrictEqual(before);
+  });
+});
+
+describe('POST /api/admin/users/[id]/reset-password (SEC-20): what else it leaves alone', () => {
+  beforeEach(() => givePassword('employee1'));
+
+  it('changes only the credential and the update stamp of the account', async () => {
+    fakeClock.advance(MINUTE_MS); // so a stamp that moved is visible
+    const CREDENTIAL_FIELDS = [
+      'passwordHash',
+      'mustChangePassword',
+      'temporaryPasswordExpiresAt',
+      'updatedAt',
+    ];
+    const strip = (row: object | undefined) =>
+      Object.fromEntries(
+        Object.entries(row as object).filter(([field]) => !CREDENTIAL_FIELDS.includes(field)),
+      );
+    const before = userRow(ids.employee1 as string);
+
+    await resetAsAdmin('employee1');
+
+    const after = userRow(ids.employee1 as string);
+    expect(strip(after)).toStrictEqual(strip(before));
+    expect(after?.updatedAt).toStrictEqual(new Date(T0.getTime() + MINUTE_MS));
+    expect(after?.passwordHash).not.toBe(before?.passwordHash);
+  });
+
+  it('keeps a blocked account blocked, and sign-in impossible until it is unblocked', async () => {
+    const admin = asUser('ADMIN');
+    await apiBlock(admin, ids.employee1 as string);
+
+    const temporary = await resetAsAdmin('employee1');
+
+    expect(userRow(ids.employee1 as string)).toMatchObject({
+      isBlocked: true,
+      deletedAt: null,
+      mustChangePassword: true,
+    });
+    const refused = await signIn('employee1', temporary.value);
+    expect(refused.response.status).toBe(401);
+    expect(await refused.response.text()).toBe(GENERIC_401);
+
+    await apiUnblock(admin, ids.employee1 as string);
+    expect(await body((await signIn('employee1', temporary.value)).response)).toMatchObject({
+      authStage: 'INITIAL_PASSWORD_CHANGE',
+    });
+  });
+
+  it('does not touch any other account: its row, its password or its sessions', async () => {
+    givePassword('employee2');
+    const bystander = asUser('employee2');
+    const before = userRow(ids.employee2 as string);
+
+    await resetAsAdmin('employee1');
+
+    expect(userRow(ids.employee2 as string)).toStrictEqual(before);
+    expect((await apiMe(bystander)).status).toBe(200);
+    expect((await signIn('employee2', PASSWORD)).response.status).toBe(200);
+  });
+
+  it('does not end the session of the Administrator who did the reset', async () => {
+    const admin = asUser('ADMIN');
+
+    await apiReset(admin, ids.employee1 as string);
+
+    expect((await apiMe(admin)).status).toBe(200);
+  });
+
+  it('can reset the permanent ADMIN account like any other (a deliberate decision, see docs)', async () => {
+    const admin = asUser('ADMIN');
+    const loginBefore = userRow(ids.ADMIN as string)?.login;
+
+    const response = await apiReset(admin, ids.ADMIN as string);
+
+    expect(response.status).toBe(200);
+    expect(userRow(ids.ADMIN as string)).toMatchObject({
+      login: loginBefore,
+      mustChangePassword: true,
+      isBlocked: false,
+      deletedAt: null,
+    });
+    // It ends the Administrator's own session too: the temporary password has to be used.
+    expect((await apiMe(admin)).status).toBe(401);
+  });
+});
+
+describe('POST /api/admin/users/[id]/reset-password (SEC-20): the plaintext goes nowhere but the response', () => {
+  beforeEach(() => givePassword('employee1'));
+
+  it('appears in the response body only: not in headers, any table, or any log line', async () => {
+    const output = captureOutput();
+    let response: Response;
+    try {
+      response = await apiReset(asUser('ADMIN'), ids.employee1 as string);
+    } finally {
+      output.restore();
+    }
+    const raw = await response.clone().text();
+    const secret = (JSON.parse(raw) as { temporaryPassword: { value: string } }).temporaryPassword
+      .value;
+
+    expect(raw.split(secret)).toHaveLength(2); // exactly once in the body
+    expect([...response.headers.values()].some((value) => value.includes(secret))).toBe(false);
+    expect(output.lines().some((line) => line.includes(secret))).toBe(false);
+    // Every table, whatever it is called today: a column added later cannot start leaking it.
+    const tables = db.all<{ name: string }>(
+      sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
+    );
+    expect(tables.length).toBeGreaterThan(5);
+    for (const { name } of tables) {
+      const dump = JSON.stringify(db.all(sql.raw(`SELECT * FROM "${name}"`)));
+      expect(dump.includes(secret), `table ${name}`).toBe(false);
+    }
+  });
+
+  it('is not echoed back by a refused attempt either', async () => {
+    const output = captureOutput();
+    try {
+      await apiReset(asUser('ADMIN'), ids.employee1 as string, {
+        newPassword: 'Smuggled secret 123!',
+      });
+    } finally {
+      output.restore();
+    }
+
+    expect(output.lines().some((line) => line.includes('Smuggled secret'))).toBe(false);
+  });
+});
+
+describe('POST /api/admin/users/[id]/reset-password (SEC-20): what it refuses', () => {
+  beforeEach(() => givePassword('employee1'));
+
+  /** The account exactly as it was: row, history and sessions. */
+  const snapshot = (userId: string) => ({
+    row: userRow(userId),
+    history: historyOf(userId),
+    sessions: sessionRows(userId),
+  });
+
+  it.each(['manager1', 'manager2', 'employee1', 'employee2', 'guest1', 'guest2'])(
+    '%s receives 403, and the target account is untouched',
+    async (login) => {
+      const bystander = asUser('employee2');
+      const target = login === 'employee1' ? ids.employee2 : ids.employee1;
+      const before = snapshot(target as string);
+
+      const response = await apiReset(asUser(login), target as string);
+
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe(FORBIDDEN);
+      expect(snapshot(target as string)).toStrictEqual(before);
+      expect((await apiMe(bystander)).status).toBe(200);
+    },
+  );
+
+  it('answers an anonymous caller with 401, and the account is untouched', async () => {
+    const before = snapshot(ids.employee1 as string);
+
+    const response = await apiReset(asUser(), ids.employee1 as string);
+
+    expect(response.status).toBe(401);
+    expect(await response.text()).toBe(NOT_SIGNED_IN);
+    expect(snapshot(ids.employee1 as string)).toStrictEqual(before);
+  });
+
+  it('refuses an Administrator session that must still change its password', async () => {
+    const before = snapshot(ids.employee1 as string);
+
+    const response = await apiReset(
+      asUser('ADMIN', 'INITIAL_PASSWORD_CHANGE'),
+      ids.employee1 as string,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain(PASSWORD_CHANGE);
+    expect(snapshot(ids.employee1 as string)).toStrictEqual(before);
+  });
+
+  it('answers 404 for an unknown account, the same way as for any other missing resource', async () => {
+    const response = await apiReset(asUser('ADMIN'), NO_SUCH_USER);
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe(NOT_FOUND);
+  });
+
+  it('answers 404 for a deleted account and does not touch it', async () => {
+    db.update(users)
+      .set({ deletedAt: T0 })
+      .where(eq(users.id, ids.employee1 as string))
+      .run();
+    const before = snapshot(ids.employee1 as string);
+
+    const response = await apiReset(asUser('ADMIN'), ids.employee1 as string);
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe(NOT_FOUND);
+    expect(snapshot(ids.employee1 as string)).toStrictEqual(before);
+  });
+
+  it('answers 400 for an id that is not a UUID', async () => {
+    expect((await apiReset(asUser('ADMIN'), 'not-a-uuid')).status).toBe(400);
+  });
+
+  it.each([
+    ['a password the caller would like to be set', { newPassword: 'Chosen by the caller 1!' }],
+    ['an unknown key', { reason: 'forgot' }],
+    ['an array', []],
+    ['null', null],
+    ['text', 'reset'],
+  ])('answers 400 when the body is %s, and changes nothing', async (_what, json) => {
+    const before = snapshot(ids.employee1 as string);
+
+    const response = await apiReset(asUser('ADMIN'), ids.employee1 as string, json);
+
+    expect(response.status).toBe(400);
+    expect(await errorCode(response)).toBe('VALIDATION_ERROR');
+    expect(snapshot(ids.employee1 as string)).toStrictEqual(before);
+  });
+
+  it('wants a JSON body: a bodyless post or a form post cannot trigger a reset', async () => {
+    const admin = asUser('ADMIN');
+    const before = snapshot(ids.employee1 as string);
+    const path = `/api/admin/users/${ids.employee1}/reset-password`;
+    const params = { id: ids.employee1 as string };
+
+    const bodiless = await admin.post(resetPasswordRoute, path, { params });
+    const form = await admin.post(resetPasswordRoute, path, {
+      params,
+      body: '',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+
+    expect([bodiless.status, form.status]).toStrictEqual([400, 400]);
+    expect(snapshot(ids.employee1 as string)).toStrictEqual(before);
+  });
+});
+
+describe('resetPassword (the service): all or nothing', () => {
+  beforeEach(() => givePassword('employee1'));
+
+  it('changes nothing at all when ending the sessions fails after the password was replaced', async () => {
+    asUser('employee1'); // a live session, so that revoking it has something to fail on
+    db.run(
+      sql`CREATE TRIGGER fail_revoke BEFORE UPDATE ON sessions BEGIN SELECT RAISE(ABORT, 'boom'); END`,
+    );
+    const before = {
+      row: userRow(ids.employee1 as string),
+      history: historyOf(ids.employee1 as string),
+    };
+
+    await expect(resetPassword(db, ids.employee1 as string)).rejects.toThrow('boom');
+
+    expect(userRow(ids.employee1 as string)).toStrictEqual(before.row);
+    expect(historyOf(ids.employee1 as string)).toStrictEqual(before.history);
+    expect(sessionRows(ids.employee1 as string).every((s) => s.revokedAt === null)).toBe(true);
+    // The password that was replaced in the failed attempt still signs in.
+    expect((await signIn('employee1', PASSWORD)).response.status).toBe(200);
   });
 });
