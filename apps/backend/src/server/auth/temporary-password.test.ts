@@ -64,11 +64,25 @@ describe('generateTemporaryPassword (variant 2, SEC-08)', () => {
   });
 
   // The guaranteed letter, digit and special character must not sit at fixed positions, or
-  // knowing the template would shrink the search space a lot.
-  it('varies at every position: at least 10 distinct characters across the samples', () => {
+  // knowing the template would shrink the search space a lot. "At least 10 distinct characters
+  // per position" cannot tell: a position that always holds a digit shows exactly 10, and one that
+  // always holds a special shows 19. So the share of each kind is checked at every position.
+  //
+  // One of each kind is placed on purpose, the other 13 come from a pool of 52 letters, 10 digits
+  // and 19 specials. Uniformly shuffled, a position is a digit with probability
+  // 1/16 + 13/16 * 10/81 (16%) and a special with 1/16 + 13/16 * 19/81 (25%). The allowed spread
+  // is 6 standard deviations of 1000 draws, so a correct generator fails about once in 10^7 runs.
+  it.each([
+    ['a digit', 10, (character: string) => /[0-9]/.test(character)],
+    ['a special character', 19, (character: string) => SPECIALS.includes(character)],
+  ])('puts %s at every position about as often as chance says', (_, groupSize, isOfKind) => {
+    const expected = 1 / 16 + (13 / 16) * (groupSize / 81);
+    const allowed = 6 * Math.sqrt((expected * (1 - expected)) / samples.length);
+
     for (let position = 0; position < TEMP_PASSWORD_LENGTH; position++) {
-      const seen = new Set(samples.map((password) => password.charAt(position)));
-      expect(seen.size, `position ${position}`).toBeGreaterThanOrEqual(10);
+      const share =
+        samples.filter((password) => isOfKind(password.charAt(position))).length / samples.length;
+      expect(Math.abs(share - expected), `position ${position}`).toBeLessThan(allowed);
     }
   });
 
