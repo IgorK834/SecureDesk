@@ -75,6 +75,30 @@ describe('db:seed', () => {
     expect(out).not.toContain('$argon2id$');
   });
 
+  it('also creates the five demo tickets in a development database, once', () => {
+    run('migrate', { DATABASE_PATH: dbFile });
+
+    const first = run('seed', { DATABASE_PATH: dbFile });
+    const second = run('seed', { DATABASE_PATH: dbFile });
+
+    expect(first.status).toBe(0);
+    expect(first.out).toMatch(/created 5 demo ticket\(s\)/);
+    expect(second.out).not.toMatch(/demo ticket/);
+    expect(query('SELECT 1 FROM tickets')).toHaveLength(5);
+  });
+
+  it('creates no demo tickets when NODE_ENV is production, but still seeds the accounts', () => {
+    run('migrate', { DATABASE_PATH: dbFile, NODE_ENV: 'production' });
+
+    const { status, out } = run('seed', { DATABASE_PATH: dbFile, NODE_ENV: 'production' });
+
+    expect(status).toBe(0);
+    expect(out).toMatch(/created 7 account\(s\)/);
+    expect(out).not.toMatch(/demo ticket/);
+    expect(query('SELECT 1 FROM tickets')).toEqual([]);
+    expect(query('SELECT 1 FROM users')).toHaveLength(7);
+  });
+
   it('on a second run creates nothing and leaves the credentials file as it was', () => {
     run('migrate', { DATABASE_PATH: dbFile });
     run('seed', { DATABASE_PATH: dbFile });
@@ -160,6 +184,7 @@ describe('db:seed:test (NODE_ENV=test)', () => {
     expect(out).toMatch(/NODE_ENV=test\) - created 7 account\(s\)/);
     expect(out).toMatch(/not persisted/);
     expect(query('SELECT 1 FROM users', testDb)).toHaveLength(7);
+    expect(query('SELECT 1 FROM tickets', testDb)).toHaveLength(5);
     expect(existsSync(path.join(tmp, '.local'))).toBe(false);
     expect(existsSync(dbFile)).toBe(false);
   });
