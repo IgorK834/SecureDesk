@@ -20,6 +20,8 @@ import {
   rolePermissions,
   securitySettings,
   sessions,
+  TICKET_STATUSES,
+  tickets,
   users,
 } from '.';
 import * as drizzleSchema from '.';
@@ -70,7 +72,7 @@ function newSession(userId: string, overrides: Partial<typeof sessions.$inferIns
 }
 
 describe('migrated schema', () => {
-  it('contains the seven core tables and no ticket table yet', () => {
+  it('contains the seven core tables and the tickets table', () => {
     expect(tableNames()).toEqual([
       'password_history',
       'permissions',
@@ -78,6 +80,7 @@ describe('migrated schema', () => {
       'roles',
       'security_settings',
       'sessions',
+      'tickets',
       'users',
     ]);
   });
@@ -89,6 +92,13 @@ describe('migrated schema', () => {
     expect(indexesOf('sessions')).toContainEqual({ unique: false, columns: ['last_activity_at'] });
     expect(indexesOf('password_history')).toContainEqual({ unique: false, columns: ['user_id'] });
     expect(indexesOf('permissions')).toContainEqual({ unique: true, columns: ['code'] });
+    // The ticket policy filters on creator and assignee, and lists are filtered by status.
+    expect(indexesOf('tickets')).toContainEqual({ unique: false, columns: ['created_by_user_id'] });
+    expect(indexesOf('tickets')).toContainEqual({
+      unique: false,
+      columns: ['assigned_to_user_id'],
+    });
+    expect(indexesOf('tickets')).toContainEqual({ unique: false, columns: ['status'] });
   });
 });
 
@@ -138,8 +148,9 @@ describe('the Drizzle schema in code matches the migrations', () => {
 
     expect(declared.sort()).toEqual(migrated.sort());
     // role_permissions -> roles, role_permissions -> permissions, users -> roles,
-    // password_history -> users, sessions -> users, security_settings -> users
-    expect(declared).toHaveLength(6);
+    // password_history -> users, sessions -> users, security_settings -> users,
+    // tickets -> users (creator), tickets -> users (assignee)
+    expect(declared).toHaveLength(8);
   });
 });
 
@@ -478,5 +489,121 @@ describe('security_settings', () => {
       db.update(securitySettings).set({ updatedBy: 'ghost-user' }).run(),
     );
     expect(mapDbError(error)).toBeInstanceOf(DbReferenceError);
+  });
+});
+
+describe('tickets', () => {
+  const newTicket = (
+    createdByUserId: string,
+    overrides: Partial<typeof tickets.$inferInsert> = {},
+  ) => ({
+    title: 'Printer is broken',
+    description: 'It prints blank pages.',
+    createdByUserId,
+    ...overrides,
+  });
+
+  it.each(TICKET_STATUSES)('accepts the status %s', (status) => {
+    const creator = insertUser(db);
+
+    db.insert(tickets).values(newTicket(creator, { status })).run();
+
+    expect(db.select({ status: tickets.status }).from(tickets).all()).toEqual([{ status }]);
+  });
+
+  it.each(['CLOSED', 'open', ''])('rejects the status %j at the database level', (status) => {
+    const creator = insertUser(db);
+
+    const error = captureError(() =>
+      db
+        .insert(tickets)
+        .values(newTicket(creator, { status: status as never }))
+        .run(),
+    );
+
+    expect(sqliteCode(error)).toBe('SQLITE_CONSTRAINT_CHECK');
+  });
+
+  it('starts a ticket as OPEN and unassigned, with a UUID id and timestamps from the clock', () => {
+    setClockForTests({ now: () => new Date('2030-03-03T03:03:03.000Z') });
+    const creator = insertUser(db);
+
+    db.insert(tickets).values(newTicket(creator)).run();
+    const [row] = db.select().from(tickets).all();
+
+    expect(row?.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(row).toMatchObject({
+      status: 'OPEN',
+      createdByUserId: creator,
+      assignedToUserId: null,
+      createdAt: new Date('2030-03-03T03:03:03.000Z'),
+      updatedAt: new Date('2030-03-03T03:03:03.000Z'),
+    });
+  });
+
+  it('refuses a ticket without a creator and one whose creator does not exist', () => {
+    const missing = captureError(() =>
+      db
+        .insert(tickets)
+        .values({ title: 't', description: 'd' } as never)
+        .run(),
+    );
+    const ghost = captureError(() => db.insert(tickets).values(newTicket('ghost-user')).run());
+
+    expect(sqliteCode(missing)).toBe('SQLITE_CONSTRAINT_NOTNULL');
+    expect(mapDbError(ghost)).toBeInstanceOf(DbReferenceError);
+  });
+
+  it('refuses an assignee that does not exist, but allows having none', () => {
+    const creator = insertUser(db);
+    db.insert(tickets)
+      .values(newTicket(creator, { assignedToUserId: null }))
+      .run();
+
+    const error = captureError(() =>
+      db
+        .insert(tickets)
+        .values(newTicket(creator, { assignedToUserId: 'ghost-user' }))
+        .run(),
+    );
+
+    expect(mapDbError(error)).toBeInstanceOf(DbReferenceError);
+    expect(db.select().from(tickets).all()).toHaveLength(1);
+  });
+
+  it('keeps creator and assignee apart: they may be different users, or the same one', () => {
+    const creator = insertUser(db, { login: 'guest1' });
+    const employee = insertUser(db, { login: 'employee1' });
+
+    db.insert(tickets)
+      .values(newTicket(creator, { assignedToUserId: employee }))
+      .run();
+    db.insert(tickets)
+      .values(newTicket(employee, { assignedToUserId: employee }))
+      .run();
+
+    expect(
+      db.select({ by: tickets.createdByUserId, to: tickets.assignedToUserId }).from(tickets).all(),
+    ).toEqual([
+      { by: creator, to: employee },
+      { by: employee, to: employee },
+    ]);
+  });
+
+  it('refreshes updated_at when the status changes, without touching created_at', () => {
+    setClockForTests({ now: () => new Date('2030-01-01T00:00:00.000Z') });
+    const creator = insertUser(db);
+    db.insert(tickets).values(newTicket(creator)).run();
+    setClockForTests({ now: () => new Date('2030-01-01T06:00:00.000Z') });
+
+    db.update(tickets).set({ status: 'RESOLVED' }).run();
+
+    expect(db.select().from(tickets).all()[0]).toMatchObject({
+      status: 'RESOLVED',
+      createdAt: new Date('2030-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2030-01-01T06:00:00.000Z'),
+    });
   });
 });
