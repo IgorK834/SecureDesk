@@ -58,6 +58,7 @@ export function meResponse(
     authStage,
     mustChangePassword: authStage === 'INITIAL_PASSWORD_CHANGE',
     permissions: [...permissions],
+    passwordPolicy: { minPasswordLength: 12, rejectPersonalDataInPassword: false },
   };
 }
 

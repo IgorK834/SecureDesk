@@ -228,9 +228,13 @@ the role's permissions. Its refusals:
 ### Endpoints
 
 - `GET /api/auth/me`: open to every stage. Returns `{ user, authStage, mustChangePassword,
-permissions }` (`user` is the same five fields as the login response). `mustChangePassword` is the
-  account flag, as in the login response; clients should decide from `authStage`, which also covers
-  an expired password.
+permissions, passwordPolicy }` (`user` is the same five fields as the login response).
+  `mustChangePassword` is the account flag, as in the login response; clients should decide from
+  `authStage`, which also covers an expired password. `passwordPolicy` is `{ minPasswordLength,
+rejectPersonalDataInPassword }`, the current values from the security settings, read on every call.
+  A session that still has to change its password gets it too, because the screen that forces the
+  change needs the hint and the session can reach no other endpoint. The other two settings (password
+  expiry, idle timeout) are not part of it.
 - `POST /api/auth/logout`: open to every stage, so a user who must change the password can still
   sign out. Revokes the caller's session only (other devices stay signed in), clears the cookie and
   answers `204`. Without a valid session it answers `401`, not a silent success.
