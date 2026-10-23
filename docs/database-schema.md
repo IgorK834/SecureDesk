@@ -107,8 +107,9 @@ The seed (`src/server/db/seeds/`, entry point `scripts/seed.ts`) creates, in one
 
 Rules:
 
-- **Idempotent.** Roles, permissions, links and settings are inserted with `ON CONFLICT DO NOTHING`. An account that already exists (matched by `login_normalized`) is skipped: no password is generated for it and its `password_hash` is never read or changed, so re-running cannot overwrite a real credential. Because it only adds, a re-run also does not remove permissions that were dropped from the matrix.
+- **Idempotent.** Roles, permissions, links and settings are inserted with `ON CONFLICT DO NOTHING`. An account that already exists (matched by `login_normalized`) is skipped: no password is generated for it and its `password_hash` is never read or changed, so re-running cannot overwrite a real credential. The links between roles and permissions are the exception: they are made to equal the matrix on every run, so a link that was dropped from `matrix.ts` is removed and a missing one is restored (an edited role name or description is not rewritten).
 - **No stored secret.** The repository contains no password. Each new account gets a fresh credential from `issueTemporaryCredential()` (a 16-character CSPRNG password, hashed with Argon2id; see [architecture.md](architecture.md#temporary-passwords-variant-2)). Two seeds therefore never produce the same password or hash.
+- **Demo tickets.** In development and test databases (any `NODE_ENV` except `production`) the seed also creates five tickets with fixed ids, one for each way a ticket can relate to the seed accounts (`src/server/db/seeds/tickets.ts`; who sees which one is in [permissions.md](permissions.md#who-sees-the-seeded-tickets)). A ticket that already exists is left exactly as it is, so a re-run never resets a status or an assignee that someone changed. In production the seed creates no tickets.
 - **First login.** Every seeded account has `must_change_password = 1`. The six test users also get `temporary_password_expires_at` = the time the password was issued + 12 hours.
 - **Delivery.** The plaintext of newly created accounts is appended to `apps/backend/.local/initial-credentials.txt` (git-ignored; directory `0700`, file `0600`). The seed prints that path and counts, never a password or hash. Delete the file once the passwords are changed. With `NODE_ENV=test` nothing is written to disk; `seedDatabase(db)` returns the passwords to the calling test.
 - **Failure.** The credentials directory is created before any account, so a permission problem aborts the run first. A failing run prints only the error message, and a test asserts that a failing insert never prints a hash or SQL, so a Drizzle upgrade that starts adding statements or parameters to error messages fails that test instead of leaking hashes to the console.
@@ -121,7 +122,7 @@ This seed creates six test accounts and is meant for development and review data
 
 ## Tables
 
-Seven tables hold identity, authorization and session state. The `tickets` table is added in Task 3.3. Types below are SQLite storage classes: "boolean" columns hold `0`/`1`, and every timestamp is an `INTEGER` of **UTC epoch milliseconds** (`integer(..., { mode: 'timestamp_ms' })` in Drizzle).
+Seven tables hold identity, authorization and session state, and `tickets` (Task 3.3) holds the support tickets. Types below are SQLite storage classes: "boolean" columns hold `0`/`1`, and every timestamp is an `INTEGER` of **UTC epoch milliseconds** (`integer(..., { mode: 'timestamp_ms' })` in Drizzle).
 
 ```mermaid
 erDiagram
@@ -131,6 +132,8 @@ erDiagram
     users ||--o{ password_history : "user_id"
     users ||--o{ sessions : "user_id"
     users |o--o{ security_settings : "updated_by"
+    users ||--o{ tickets : "created_by_user_id"
+    users |o--o{ tickets : "assigned_to_user_id"
 
     roles {
         TEXT id PK "stable key, e.g. manager"
@@ -193,6 +196,17 @@ erDiagram
         INTEGER updated_at "timestamp"
         TEXT updated_by FK "nullable"
     }
+
+    tickets {
+        TEXT id PK "UUID"
+        TEXT title "plain text, 1-120 characters (API)"
+        TEXT description "plain text, 1-5000 characters (API)"
+        TEXT status "CHECK: OPEN, IN_PROGRESS, RESOLVED; default OPEN"
+        TEXT created_by_user_id FK "NOT NULL, the creator"
+        TEXT assigned_to_user_id FK "nullable, the assigned employee"
+        INTEGER created_at "timestamp"
+        INTEGER updated_at "timestamp"
+    }
 ```
 
 A test (`schema/er-diagram.test.ts`) migrates an empty database and fails if this diagram disagrees with it about tables, columns, types, primary keys, unique columns or foreign keys, so the diagram cannot silently go stale.
@@ -207,12 +221,15 @@ A test (`schema/er-diagram.test.ts`) migrates an empty database and fails if thi
 | A session has one of three known auth stages         | `CHECK` on `sessions.auth_stage`                                                                                                             |
 | Sessions can be revoked without deleting them        | `sessions.revoked_at`                                                                                                                        |
 | One settings row; minimum password length never < 12 | `CHECK (id = 1)` and `CHECK (min_password_length >= 12)` on `security_settings`                                                              |
+| A ticket has one creator, at most one assignee       | `tickets.created_by_user_id` is `NOT NULL`; both it and the nullable `assigned_to_user_id` are foreign keys to `users.id`                    |
+| A ticket has one of three known statuses             | `CHECK` on `tickets.status`                                                                                                                  |
+| Who may read or change a ticket                      | not the database: `src/server/tickets/policy.ts` decides, see [permissions.md](permissions.md)                                               |
 | The permanent `ADMIN` account is protected           | triggers from migration `0001_protect_admin_account` (below) plus the service-layer checks of Task 4.3                                       |
 | Accounts are never hard-deleted by the application   | soft delete through `users.deleted_at`; foreign keys from sessions and history keep pointing at a real row                                   |
 
 ### Notes
 
-- **IDs.** `users`, `sessions` and `password_history` use UUIDs generated by the application. `roles.id` and `permissions.id` are stable keys (a role's id is its `ROLES` value, a permission's id is its code), so they are identical in every database and the seed can be re-run safely.
+- **IDs.** `users`, `sessions`, `password_history` and `tickets` use UUIDs generated by the application. `roles.id` and `permissions.id` are stable keys (a role's id is its `ROLES` value, a permission's id is its code), so they are identical in every database and the seed can be re-run safely.
 - **Login reservation.** `login_normalized` is unique across _all_ rows, including soft-deleted ones, so a deleted login cannot be re-registered by someone else.
 - **Settings.** `updated_by` is `NULL` while the row still holds the seeded defaults.
 - **Time.** Row timestamps default to `clock.now()` (`src/server/time/clock.ts`), so tests that replace the clock also control `created_at`/`updated_at`.
