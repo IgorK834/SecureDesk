@@ -75,6 +75,8 @@ export class ApiClient {
     this.request(route, 'POST', path, options);
   patch = (route: RouteModule, path: string, options?: CallOptions) =>
     this.request(route, 'PATCH', path, options);
+  delete = (route: RouteModule, path: string, options?: CallOptions) =>
+    this.request(route, 'DELETE', path, options);
 
   // A browser keeps what Set-Cookie says and drops a cookie that is cleared or already expired.
   private store(response: Response): void {

@@ -1,7 +1,7 @@
 import { getTableColumns } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { users, type UserRow } from '../db/schema';
-import { toProfile, toSafeUser } from './mappers';
+import { toAdminUserDto, toProfile, toSafeUser } from './mappers';
 
 const row: UserRow = {
   id: '3f0c2f0e-8a38-4c53-9b1d-0e2c6a1f9a11',
@@ -106,5 +106,74 @@ describe('toProfile', () => {
     expect(json).not.toMatch(
       /argon2|digest|someFutureColumn|isBlocked|mustChangePassword|deleted/i,
     );
+  });
+});
+
+// The administrator's view exposes more than `toSafeUser` (the password state) but still never a
+// credential. As above, a new `users` column fails the completeness test until it is classified.
+const ADMIN_WITHHELD = ['passwordHash', 'deletedAt', 'loginNormalized'];
+
+describe('toAdminUserDto', () => {
+  it('copies exactly the allowlisted fields, with the role as an upper-case code', () => {
+    expect(toAdminUserDto(row)).toStrictEqual({
+      id: row.id,
+      login: 'Employee1',
+      firstName: 'Katarzyna',
+      lastName: 'Wiśniewska',
+      role: 'EMPLOYEE',
+      isBlocked: false,
+      mustChangePassword: true,
+      temporaryPasswordExpiresAt: row.temporaryPasswordExpiresAt,
+      passwordChangedAt: row.passwordChangedAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    });
+  });
+
+  it('never carries a credential, a token, the normalized login or the deletion marker', () => {
+    const json = JSON.stringify(toAdminUserDto(row));
+
+    expect(json).not.toMatch(/argon2|passwordHash|password_hash|token|loginNormalized|deleted/i);
+  });
+
+  it('cannot leak a joined or future column, however the input is polluted', () => {
+    const polluted = { ...row, tokenHash: 'digest', someFutureColumn: 'x' } as unknown as UserRow;
+
+    expect(Object.keys(toAdminUserDto(polluted)).sort()).toStrictEqual(
+      Object.keys(toAdminUserDto(row)).sort(),
+    );
+    expect(JSON.stringify(toAdminUserDto(polluted))).not.toMatch(/digest|someFutureColumn/);
+  });
+
+  it('accounts for every users column: each is either exposed or explicitly withheld', () => {
+    // `roleId` is exposed as `role`.
+    const exposed = Object.keys(toAdminUserDto(row)).map((key) =>
+      key === 'role' ? 'roleId' : key,
+    );
+    const columns = Object.keys(getTableColumns(users));
+
+    expect([...exposed, ...ADMIN_WITHHELD].sort()).toEqual([...columns].sort());
+  });
+
+  it('turns every role id into its code', () => {
+    const roles = ['administrator', 'manager', 'employee', 'guest'];
+
+    expect(roles.map((roleId) => toAdminUserDto({ ...row, roleId }).role)).toStrictEqual([
+      'ADMINISTRATOR',
+      'MANAGER',
+      'EMPLOYEE',
+      'GUEST',
+    ]);
+  });
+
+  it('keeps the nullable password-state fields null rather than inventing a value', () => {
+    const dto = toAdminUserDto({
+      ...row,
+      temporaryPasswordExpiresAt: null,
+      passwordChangedAt: null,
+    });
+
+    expect(dto.temporaryPasswordExpiresAt).toBeNull();
+    expect(dto.passwordChangedAt).toBeNull();
   });
 });
