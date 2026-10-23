@@ -1,6 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
+import type { MeResponse } from '../auth/auth.models';
 
 export interface HealthResponse {
   status: 'ok';
@@ -17,5 +18,10 @@ export class ApiClient {
 
   health(): Observable<HealthResponse> {
     return this.http.get<HealthResponse>('/api/health');
+  }
+
+  /** Who the session cookie belongs to; the server answers 401 when there is no valid session. */
+  me(): Observable<MeResponse> {
+    return this.http.get<MeResponse>('/api/auth/me');
   }
 }

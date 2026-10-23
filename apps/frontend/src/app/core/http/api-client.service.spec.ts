@@ -5,6 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injector } from '@angular/core';
 import { firstValueFrom, of } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
+import { meResponse } from '../../__fixtures__/session';
 import { ApiClient } from './api-client.service';
 
 function createClient(get: ReturnType<typeof vi.fn>): ApiClient {
@@ -36,5 +37,17 @@ describe('ApiClient.health()', () => {
     await expect(firstValueFrom(createClient(get).health())).resolves.toStrictEqual({
       status: 'ok',
     });
+  });
+});
+
+describe('ApiClient.me()', () => {
+  it('issues a GET to the relative /api/auth/me URL and emits the body unchanged', async () => {
+    const body = meResponse('EMPLOYEE');
+    const get = vi.fn().mockReturnValue(of(body));
+
+    await expect(firstValueFrom(createClient(get).me())).resolves.toStrictEqual(body);
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get.mock.calls[0]?.[0]).toBe('/api/auth/me');
   });
 });
