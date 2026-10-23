@@ -14,11 +14,10 @@ export default defineConfig({
       exclude: [
         '**/*.{test,spec}.ts',
         '**/__fixtures__/**',
-        // Pure Angular wiring/bootstrap; needs the Angular compiler to run, so it is
-        // exercised by `ng build` / `ng test` rather than the plain-Vitest root run.
+        // The root component uses `templateUrl`/`styleUrl`, which need the Angular compiler;
+        // it is exercised by `ng build` rather than the plain-Vitest root run. The app config
+        // and routes are not excluded: app.routes.spec.ts runs them for real.
         'apps/frontend/src/app/app.ts',
-        'apps/frontend/src/app/app.config.ts',
-        'apps/frontend/src/app/app.routes.ts',
       ],
       thresholds: { lines: 80, statements: 80, functions: 80, branches: 80 },
     },
