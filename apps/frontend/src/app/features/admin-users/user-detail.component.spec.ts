@@ -5,13 +5,14 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { type Observable, Subject, of, throwError } from 'rxjs';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { adminUser, apiFailure } from '../../__fixtures__/admin-users';
 import { installDialogPolyfill } from '../../__fixtures__/dialog';
 import { AuthService } from '../../core/auth/auth.service';
 import {
   AdminApi,
   type AdminUser,
+  type PasswordReset,
   type UpdateUserRequest,
 } from '../../core/http/admin-api.service';
 import { UserDetailComponent } from './user-detail.component';
@@ -24,6 +25,12 @@ class ListStub {}
 const PROTECTED_TITLE =
   'The permanent ADMIN account is protected: it cannot be blocked or deleted.';
 const ALL = ['users:read', 'users:update', 'users:block', 'users:delete'];
+const WITH_RESET = [...ALL, 'users:reset-password'];
+
+const SECRET = 'k9#Tq2!vXm7@Lp4w';
+const RESET: PasswordReset = {
+  temporaryPassword: { value: SECRET, expiresAt: '2030-01-01T12:00:00.000Z' },
+};
 
 const ACTIVE = adminUser({ id: 'u-1', login: 'jan.k', firstName: 'Jan', lastName: 'Kowalski' });
 const BLOCKED = adminUser({
@@ -47,6 +54,7 @@ interface Overrides {
   block?: (id: string) => Observable<AdminUser>;
   unblock?: (id: string) => Observable<AdminUser>;
   delete?: (id: string) => Observable<void>;
+  resetPassword?: (id: string) => Observable<PasswordReset>;
   update?: (id: string, changes: UpdateUserRequest) => Observable<AdminUser>;
 }
 
@@ -57,6 +65,7 @@ async function open(url: string, overrides: Overrides = {}) {
     block: vi.fn(overrides.block ?? ((id: string) => of(adminUser({ id, isBlocked: true })))),
     unblock: vi.fn(overrides.unblock ?? ((id: string) => of(adminUser({ id, isBlocked: false })))),
     delete: vi.fn(overrides.delete ?? (() => of(undefined as void))),
+    resetPassword: vi.fn(overrides.resetPassword ?? ((): Observable<PasswordReset> => of(RESET))),
     update: vi.fn(
       overrides.update ??
         ((id: string, changes: UpdateUserRequest) => of(adminUser({ ...ACTIVE, id, ...changes }))),
@@ -88,6 +97,8 @@ async function open(url: string, overrides: Overrides = {}) {
         HTMLButtonElement | undefined,
     confirmDialog: () =>
       root.querySelector('dialog[aria-labelledby="confirm-dialog-title"]') as HTMLDialogElement,
+    revealDialog: () =>
+      root.querySelector('dialog[aria-labelledby="temp-password-title"]') as HTMLDialogElement,
     // Lets the promise chains that follow a click run, then renders their result.
     async settle() {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -240,6 +251,7 @@ describe('UserDetailComponent: which buttons are offered', () => {
 
   it.each([
     ['users:update', 'Edit'],
+    ['users:reset-password', 'Reset password'],
     ['users:block', 'Block'],
     ['users:delete', 'Delete'],
   ])('offers %s as "%s" and nothing else', async (permission, label) => {
@@ -362,6 +374,195 @@ describe('UserDetailComponent: unblocking', () => {
       'Something went wrong. Try again.',
     );
     expect(t.root.querySelector('app-user-status-badge')?.textContent).toContain('Blocked');
+  });
+});
+
+describe('UserDetailComponent: resetting a password', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const saved = (t: Awaited<ReturnType<typeof open>>) =>
+    [...t.revealDialog().querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('I have saved the password'))
+      ?.click();
+
+  it('is not offered to someone without the permission', async () => {
+    const t = await open('/admin/users/u-1');
+
+    expect(t.button('Reset password')).toBeUndefined();
+  });
+
+  it('is offered to someone who holds it', async () => {
+    const t = await open('/admin/users/u-1', { granted: WITH_RESET });
+
+    expect(t.button('Reset password')?.disabled).toBe(false);
+  });
+
+  it('asks first, in words that say what will happen, and calls nothing yet', async () => {
+    const t = await open('/admin/users/u-1', { granted: WITH_RESET });
+
+    t.button('Reset password')?.click();
+    await t.settle();
+
+    const text = t.confirmDialog().textContent ?? '';
+    expect(t.confirmDialog().hasAttribute('open')).toBe(true);
+    expect(text).toContain('Reset this password?');
+    expect(text).toContain('jan.k');
+    expect(text).toContain('signed out of every session at once');
+    expect(text).toContain('current password will stop working');
+    expect(text).toContain('valid for 12 hours');
+    expect(text).toContain('replace at their next sign-in');
+    expect(text).not.toContain('stays blocked');
+    expect(text).not.toContain('permanent ADMIN');
+    expect(t.api.resetPassword).not.toHaveBeenCalled();
+    expect(t.revealDialog().hasAttribute('open')).toBe(false);
+  });
+
+  it('does nothing when the administrator cancels', async () => {
+    const t = await open('/admin/users/u-1', { granted: WITH_RESET });
+
+    await t.act('Reset password', 'cancel');
+
+    expect(t.api.resetPassword).not.toHaveBeenCalled();
+    expect(t.revealDialog().hasAttribute('open')).toBe(false);
+    expect(t.root.querySelector('app-user-status-badge')?.textContent).toContain('Active');
+  });
+
+  it('resets the account when confirmed, and shows the new password once, to say who it is for', async () => {
+    const t = await open('/admin/users/u-1', { granted: WITH_RESET });
+
+    await t.act('Reset password', 'confirm');
+
+    expect(t.api.resetPassword).toHaveBeenCalledExactlyOnceWith('u-1');
+    expect(t.revealDialog().hasAttribute('open')).toBe(true);
+    expect(t.revealDialog().querySelector('output')?.textContent).toBe(SECRET);
+    expect(t.revealDialog().textContent).toContain('The password of jan.k has been reset');
+    expect(t.revealDialog().textContent).toContain('only once');
+  });
+
+  it('shows the account as owing a new password, with the deadline of the one just issued', async () => {
+    const t = await open('/admin/users/u-1', { granted: WITH_RESET });
+
+    await t.act('Reset password', 'confirm');
+
+    expect(t.root.querySelector('app-user-status-badge')?.textContent).toContain(
+      'Pending first login',
+    );
+    expect(t.text()).toContain('Temporary password valid until');
+    expect(t.text()).toContain('Password reset. Its sessions were ended.');
+  });
+
+  it('keeps the password in the one-time dialog only, and removes it when that is closed', async () => {
+    const consoleCalls = (['log', 'info', 'warn', 'error', 'debug'] as const).map((method) =>
+      vi.spyOn(console, method),
+    );
+    const t = await open('/admin/users/u-1', { granted: WITH_RESET });
+
+    await t.act('Reset password', 'confirm');
+
+    expect(t.root.innerHTML.split(SECRET)).toHaveLength(2); // once: inside the dialog
+    expect(t.revealDialog().innerHTML).toContain(SECRET);
+    expect(t.router.url).not.toContain(SECRET);
+    expect(JSON.stringify(history.state)).not.toContain(SECRET);
+    expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain(SECRET);
+
+    saved(t);
+    await t.settle();
+
+    expect(t.root.innerHTML).not.toContain(SECRET);
+    expect(t.revealDialog().hasAttribute('open')).toBe(false);
+    expect(consoleCalls.flatMap((spy) => spy.mock.calls.flat()).join(' ')).not.toContain(SECRET);
+  });
+
+  it('does not offer the password again: asking for a second reset gives a new one, not the old', async () => {
+    const second = {
+      temporaryPassword: {
+        value: 'Z7!pLm2#qW9xRt4v',
+        expiresAt: RESET.temporaryPassword.expiresAt,
+      },
+    };
+    const answers = [RESET, second];
+    const t = await open('/admin/users/u-1', {
+      granted: WITH_RESET,
+      resetPassword: () => of(answers.shift() as PasswordReset),
+    });
+    await t.act('Reset password', 'confirm');
+    saved(t);
+    await t.settle();
+
+    await t.act('Reset password', 'confirm');
+
+    expect(t.revealDialog().querySelector('output')?.textContent).toBe('Z7!pLm2#qW9xRt4v');
+    expect(t.root.innerHTML).not.toContain(SECRET);
+  });
+
+  it.each([
+    [404, 'This account no longer exists.'],
+    [403, 'You are not allowed to do this.'],
+    [401, 'Your session has ended. Sign in again.'],
+    [500, 'Something went wrong. Try again.'],
+  ])(
+    'shows the refusal for a %i, opens no password dialog and leaves the account as it was',
+    async (status, message) => {
+      const t = await open('/admin/users/u-1', {
+        granted: WITH_RESET,
+        resetPassword: () => throwError(() => apiFailure(status)),
+      });
+
+      await t.act('Reset password', 'confirm');
+
+      expect(t.root.querySelector('[role="alert"]')?.textContent).toBe(message);
+      expect(t.revealDialog().hasAttribute('open')).toBe(false);
+      expect(t.root.querySelector('output')).toBeNull();
+      expect(t.root.querySelector('app-user-status-badge')?.textContent).toContain('Active');
+      expect(t.button('Reset password')?.disabled).toBe(false);
+    },
+  );
+
+  it('allows only one action at a time while the reset is in flight', async () => {
+    const t = await open('/admin/users/u-1', {
+      granted: [...WITH_RESET],
+      resetPassword: () => new Subject<PasswordReset>(),
+    });
+
+    await t.act('Reset password', 'confirm');
+
+    for (const label of ['Reset password', 'Edit', 'Block', 'Delete']) {
+      expect(t.button(label)?.disabled, label).toBe(true);
+    }
+    expect(t.revealDialog().hasAttribute('open')).toBe(false);
+  });
+
+  it('says that a blocked account stays blocked, and it does', async () => {
+    const t = await open('/admin/users/u-2', { granted: WITH_RESET, get: () => of(BLOCKED) });
+
+    t.button('Reset password')?.click();
+    await t.settle();
+    expect(t.confirmDialog().textContent).toContain('stays blocked until you unblock it');
+    [...t.confirmDialog().querySelectorAll('button')]
+      .find((b) => b.className === 'confirm')
+      ?.click();
+    await t.settle();
+
+    expect(t.api.resetPassword).toHaveBeenCalledExactlyOnceWith('u-2');
+    expect(t.root.querySelector('app-user-status-badge')?.textContent).toContain('Blocked');
+    expect(t.button('Unblock')).toBeDefined();
+  });
+
+  it('can be started for the permanent ADMIN account, with a warning that nobody else can reset it', async () => {
+    const t = await open('/admin/users/u-admin', { granted: WITH_RESET, get: () => of(ADMIN) });
+    expect(t.button('Reset password')?.disabled).toBe(false);
+    expect(t.button('Reset password')?.hasAttribute('title')).toBe(false);
+
+    t.button('Reset password')?.click();
+    await t.settle();
+    expect(t.confirmDialog().textContent).toContain('no other account can reset it');
+    [...t.confirmDialog().querySelectorAll('button')]
+      .find((b) => b.className === 'confirm')
+      ?.click();
+    await t.settle();
+
+    expect(t.api.resetPassword).toHaveBeenCalledExactlyOnceWith('u-admin');
+    expect(t.revealDialog().querySelector('output')?.textContent).toBe(SECRET);
   });
 });
 

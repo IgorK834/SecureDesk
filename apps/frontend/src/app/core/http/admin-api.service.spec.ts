@@ -147,9 +147,97 @@ describe('AdminApi: one account', () => {
     api.list({ page: 1, pageSize: 20 }).subscribe();
     api.get('a').subscribe();
     api.delete('a').subscribe();
+    api.resetPassword('a').subscribe();
 
     for (const request of http.match(() => true)) {
       expect(request.request.url).toMatch(/^\/api\/admin\/users/);
+    }
+  });
+});
+
+describe('AdminApi.resetPassword', () => {
+  it('POSTs an empty JSON object to /api/admin/users/:id/reset-password and returns the answer', () => {
+    const { api, http } = setUp();
+    let result;
+    api.resetPassword('u-1').subscribe((r) => (result = r));
+
+    const request = http.expectOne('/api/admin/users/u-1/reset-password');
+    request.flush({
+      temporaryPassword: { value: 'k9#Tq2!vXm7@Lp4w', expiresAt: '2030-01-01T12:00:00.000Z' },
+    });
+
+    expect(request.request.method).toBe('POST');
+    // `{}`, not null: the server wants JSON, so that a plain form post cannot trigger a reset.
+    expect(request.request.body).toStrictEqual({});
+    expect(result).toStrictEqual({
+      temporaryPassword: { value: 'k9#Tq2!vXm7@Lp4w', expiresAt: '2030-01-01T12:00:00.000Z' },
+    });
+    http.verify();
+  });
+
+  it('puts the id in the path encoded, so it cannot add path segments or a query', () => {
+    const { api, http } = setUp();
+    api.resetPassword('a/b?c=1').subscribe();
+
+    const request = http.expectOne((r) => r.url.endsWith('/reset-password'));
+
+    expect(request.request.url).toBe('/api/admin/users/a%2Fb%3Fc%3D1/reset-password');
+    http.verify();
+  });
+});
+
+describe('AdminApi: security settings', () => {
+  const SETTINGS = {
+    minPasswordLength: 12,
+    rejectPersonalDataInPassword: false,
+    passwordMaxAgeDays: null,
+    sessionIdleTimeoutMinutes: 15,
+  };
+
+  it('getSecuritySettings: GET /api/admin/security-settings', () => {
+    const { api, http } = setUp();
+    let result;
+    api.getSecuritySettings().subscribe((r) => (result = r));
+
+    const request = http.expectOne('/api/admin/security-settings');
+    request.flush(SETTINGS);
+
+    expect(request.request.method).toBe('GET');
+    expect(result).toStrictEqual(SETTINGS);
+    http.verify();
+  });
+
+  it('updateSecuritySettings: PATCH exactly the settings it is given, and returns all four', () => {
+    const { api, http } = setUp();
+    let result;
+    api.updateSecuritySettings({ minPasswordLength: 16 }).subscribe((r) => (result = r));
+
+    const request = http.expectOne('/api/admin/security-settings');
+    request.flush({ ...SETTINGS, minPasswordLength: 16 });
+
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toStrictEqual({ minPasswordLength: 16 });
+    expect(result).toStrictEqual({ ...SETTINGS, minPasswordLength: 16 });
+    http.verify();
+  });
+
+  it('keeps a null maximum age as null in the body: that is how expiry is turned off', () => {
+    const { api, http } = setUp();
+    api.updateSecuritySettings({ passwordMaxAgeDays: null }).subscribe();
+
+    const request = http.expectOne('/api/admin/security-settings');
+
+    expect(JSON.stringify(request.request.body)).toBe('{"passwordMaxAgeDays":null}');
+    http.verify();
+  });
+
+  it('calls its own origin only', () => {
+    const { api, http } = setUp();
+    api.getSecuritySettings().subscribe();
+    api.updateSecuritySettings({ sessionIdleTimeoutMinutes: 5 }).subscribe();
+
+    for (const request of http.match(() => true)) {
+      expect(request.request.url).toBe('/api/admin/security-settings');
     }
   });
 });

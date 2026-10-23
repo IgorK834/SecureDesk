@@ -7,6 +7,8 @@ export interface TemporaryPasswordDetails {
   password: string;
   /** ISO-8601. */
   expiresAt: string;
+  /** Why there is a new password; it decides what the dialog says. Left out: a new account. */
+  reason?: 'created' | 'reset';
 }
 
 /**
@@ -28,10 +30,18 @@ export interface TemporaryPasswordDetails {
     >
       @if (details(); as d) {
         <h2 id="temp-password-title">Temporary password</h2>
-        <p>
-          The account <strong>{{ d.login }}</strong> has been created. Give the user this password
-          now: <strong>it is shown only once</strong> and cannot be retrieved later.
-        </p>
+        @if (d.reason === 'reset') {
+          <p>
+            The password of <strong>{{ d.login }}</strong> has been reset and the old one no longer
+            works. Give the user this password now: <strong>it is shown only once</strong> and
+            cannot be retrieved later.
+          </p>
+        } @else {
+          <p>
+            The account <strong>{{ d.login }}</strong> has been created. Give the user this password
+            now: <strong>it is shown only once</strong> and cannot be retrieved later.
+          </p>
+        }
         <p>
           <output class="password" aria-label="Temporary password">{{ d.password }}</output>
         </p>

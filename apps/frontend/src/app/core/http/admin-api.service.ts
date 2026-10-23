@@ -63,13 +63,25 @@ export interface CreatedUser {
   temporaryPassword: { value: string; expiresAt: string };
 }
 
+/** What a password reset answers: the new temporary password, which exists only in this answer. */
+export type PasswordReset = Pick<CreatedUser, 'temporaryPassword'>;
+
+/** The global security settings (`SecuritySettings` on the server). `null` age: no expiry. */
+export interface SecuritySettings {
+  minPasswordLength: number;
+  rejectPersonalDataInPassword: boolean;
+  passwordMaxAgeDays: number | null;
+  sessionIdleTimeoutMinutes: number;
+}
+
 const USERS_URL = '/api/admin/users';
+const SECURITY_SETTINGS_URL = '/api/admin/security-settings';
 const userUrl = (id: string) => `${USERS_URL}/${encodeURIComponent(id)}`;
 
 /**
- * Typed client for `/api/admin/users`. Like `ApiClient` it uses relative URLs only, so the
- * browser talks to its own origin and the session cookie stays same-origin. The server decides
- * who may call what; nothing here is an access check.
+ * Typed client for `/api/admin/**`. Like `ApiClient` it uses relative URLs only, so the browser
+ * talks to its own origin and the session cookie stays same-origin. The server decides who may
+ * call what; nothing here is an access check.
  */
 @Injectable({ providedIn: 'root' })
 export class AdminApi {
@@ -104,8 +116,25 @@ export class AdminApi {
     return this.http.post<AdminUser>(`${userUrl(id)}/unblock`, null);
   }
 
+  /**
+   * Replaces the account's password with a temporary one and ends its sessions. The body is an
+   * empty object, not nothing: the endpoint insists on JSON so a plain form post cannot trigger it.
+   */
+  resetPassword(id: string): Observable<PasswordReset> {
+    return this.http.post<PasswordReset>(`${userUrl(id)}/reset-password`, {});
+  }
+
   /** Soft delete: the server answers 204 and keeps the row. */
   delete(id: string): Observable<void> {
     return this.http.delete<void>(userUrl(id));
+  }
+
+  getSecuritySettings(): Observable<SecuritySettings> {
+    return this.http.get<SecuritySettings>(SECURITY_SETTINGS_URL);
+  }
+
+  /** Any non-empty subset of the settings; the answer is all four as stored. */
+  updateSecuritySettings(changes: Partial<SecuritySettings>): Observable<SecuritySettings> {
+    return this.http.patch<SecuritySettings>(SECURITY_SETTINGS_URL, changes);
   }
 }
