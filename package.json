@@ -19,6 +19,7 @@
     "test": "vitest run --coverage",
     "db:generate": "npm run db:generate -w apps/backend",
     "db:migrate": "npm run db:migrate -w apps/backend",
+    "db:migrate:test": "npm run db:migrate:test -w apps/backend",
     "db:reset:dev": "npm run db:reset:dev -w apps/backend",
     "db:reset:test": "npm run db:reset:test -w apps/backend",
     "db:seed": "npm run db:seed -w apps/backend",
