@@ -4,7 +4,7 @@ import { FakeClock } from '../../../../../tests/helpers/fake-clock';
 import { createMigratedDb, insertUser } from '../db/__fixtures__/test-db';
 import type { AppDb } from '../db/connection';
 import { passwordHistory, sessions, users } from '../db/schema';
-import { ApiError } from '../http/route';
+import { ApiError } from '../http/errors';
 import { hashPassword, verifyPassword } from './password-hasher';
 import {
   PASSWORD_HISTORY_SIZE,

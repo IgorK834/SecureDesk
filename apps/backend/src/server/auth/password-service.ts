@@ -1,7 +1,7 @@
 import { and, desc, eq, notInArray } from 'drizzle-orm';
 import type { AppDb } from '../db/connection';
 import { type UserRow, passwordHistory, users } from '../db/schema';
-import { ApiError } from '../http/route';
+import { ApiError } from '../http/errors';
 import { readSecuritySettings } from '../security/settings';
 import { clock } from '../time/clock';
 import { type Profile, toProfile } from '../users/mappers';
@@ -22,9 +22,9 @@ import { isTemporaryPasswordExpired } from './temporary-password';
 // is replaced, every session of the user is revoked and a fresh fully authenticated one is
 // issued, all in one transaction, so a failure leaves nothing half done.
 //
-// Both throw `ApiError` (the pattern of the guards and of `handleRoute`), so a route wrapped in
-// `handleRoute` needs no translation. Nothing here logs: a password, hash or token must never
-// reach a log line, and `handleRoute` records only the event name and the request id.
+// Both throw `ApiError` (the pattern of the guards and of `defineRoute`), so a route built with
+// `defineRoute` needs no translation. Nothing here logs: a password, hash or token must never
+// reach a log line, and `defineRoute` records only the event name and the request id.
 
 /** How many previous regular passwords are remembered, besides the current one (project decision). */
 export const PASSWORD_HISTORY_SIZE = 5;

@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeClock } from '../../../../../../../tests/helpers/fake-clock';
 import { sessionCookieName } from '../../../../server/auth/cookie';
-import { requireFullSession } from '../../../../server/auth/guards';
 import { hashPassword, verifyPassword } from '../../../../server/auth/password-hasher';
 import { createSession, resolveSession } from '../../../../server/auth/session-service';
 import {
@@ -21,7 +20,7 @@ import {
   sessions,
   users,
 } from '../../../../server/db/schema';
-import { handleRoute } from '../../../../server/http/route';
+import { defineRoute } from '../../../../server/http/route-handler';
 import { PERMISSIONS } from '../../../../server/permissions/codes';
 import { POST as changePassword } from '../change-password/route';
 import { POST as login } from '../login/route';
@@ -135,16 +134,17 @@ function cookieValue(response: Response): string {
   return header?.split(';')[0]?.slice(COOKIE.length + 1) ?? '';
 }
 
-// Neither /api/admin/users nor /api/tickets exists yet (Tasks 3.x and 4.x). These two stand in
-// for them with exactly what every business route uses: a guard that admits only a fully
-// authenticated session, inside the route wrapper.
-const adminUsers = handleRoute('test.admin_users', (request) => {
-  requireFullSession(request, { permission: PERMISSIONS.USERS_READ });
-  return NextResponse.json({ users: [] });
+// These two stand in for a business route and an admin route with exactly what every such route
+// uses: the route wrapper admitting only a fully authenticated session (plus a permission).
+const adminUsers = defineRoute({
+  name: 'test.admin_users',
+  auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_READ },
+  handler: () => NextResponse.json({ users: [] }),
 });
-const tickets = handleRoute('test.tickets', (request) => {
-  requireFullSession(request);
-  return NextResponse.json({ tickets: [] });
+const tickets = defineRoute({
+  name: 'test.tickets',
+  auth: { stages: ['FULLY_AUTHENTICATED'] },
+  handler: () => NextResponse.json({ tickets: [] }),
 });
 
 /** Everything that holds a credential, whole rows: "unchanged" means byte-identical. */

@@ -5,12 +5,12 @@ import { FakeClock } from '../../../../../tests/helpers/fake-clock';
 import { ensureRole, insertUser } from '../db/__fixtures__/test-db';
 import { setUpSharedTestDb } from '../db/__fixtures__/shared-test-db';
 import { db } from '../db/client';
-import { type AuthStage, sessions, users } from '../db/schema';
+import { AUTH_STAGES, type AuthStage, sessions, users } from '../db/schema';
 import { seedRbac } from '../db/seeds/rbac';
-import { ApiError } from '../http/route';
+import { ApiError } from '../http/errors';
 import { PERMISSIONS } from '../permissions/codes';
 import { sessionCookieName } from './cookie';
-import { requireFullSession, requireSession, requireStage } from './guards';
+import { type GuardOptions, requireStage } from './guards';
 import { createSession, revokeSession } from './session-service';
 
 const MINUTE_MS = 60 * 1000;
@@ -32,6 +32,12 @@ afterEach(() => fakeClock.uninstall());
 
 const open = (stage: AuthStage = 'FULLY_AUTHENTICATED', forUser: string = userId) =>
   createSession(db, forUser, stage);
+
+// The two ways routes use the guard: any signed-in stage (me, logout) or a fully authenticated one.
+const requireSession = (request: NextRequest, options?: GuardOptions) =>
+  requireStage(request, AUTH_STAGES, options);
+const requireFullSession = (request: NextRequest, options?: GuardOptions) =>
+  requireStage(request, ['FULLY_AUTHENTICATED'], options);
 
 const requestWith = (token?: string) =>
   new NextRequest('http://localhost:3000/api/anything', {
@@ -124,25 +130,16 @@ describe('a valid session', () => {
     expect(requireStage(requestWith(token), ['FULLY_AUTHENTICATED']).user.id).toBe(userId);
   });
 
-  it('counts as activity: the idle clock restarts when the request is admitted', () => {
+  // Recording activity is the route wrapper's job (it runs after the checks that follow this
+  // one, such as CSRF), so a guard that touched the session itself would count requests the
+  // wrapper later refuses. The wrapper's own tests cover the touch.
+  it('does not record activity itself: the idle clock is left alone', () => {
     const { token, session } = open();
     fakeClock.advance(10 * MINUTE_MS);
 
     requireFullSession(requestWith(token));
 
-    expect(lastActivity(session.id)).toStrictEqual(new Date(T0.getTime() + 10 * MINUTE_MS));
-  });
-
-  it('stays alive while it is used regularly, until the 12-hour limit ends it regardless', () => {
-    const { token } = open();
-
-    for (let elapsed = 10; elapsed < 12 * 60; elapsed += 10) {
-      fakeClock.set(new Date(T0.getTime() + elapsed * MINUTE_MS));
-      expect(() => requireFullSession(requestWith(token)), `at +${elapsed} min`).not.toThrow();
-    }
-
-    fakeClock.set(new Date(T0.getTime() + 12 * HOUR_MS));
-    expect(refusal(() => requireFullSession(requestWith(token))).code).toBe('AUTH_REQUIRED');
+    expect(lastActivity(session.id)).toStrictEqual(T0);
   });
 });
 
@@ -214,6 +211,30 @@ describe('403 AUTH_FORBIDDEN: the role does not grant the permission', () => {
     );
 
     expect([error.status, error.code]).toStrictEqual([403, 'AUTH_FORBIDDEN']);
+  });
+
+  it('admits a role that has at least one permission of a list, and refuses one that has none', () => {
+    const { token } = open();
+
+    expect(() =>
+      requireFullSession(requestWith(token), {
+        permission: [PERMISSIONS.USERS_CREATE, PERMISSIONS.TICKETS_CREATE],
+      }),
+    ).not.toThrow();
+    const error = refusal(() =>
+      requireFullSession(requestWith(token), {
+        permission: [PERMISSIONS.USERS_CREATE, PERMISSIONS.USERS_READ],
+      }),
+    );
+    expect(error.code).toBe('AUTH_FORBIDDEN');
+  });
+
+  it('refuses everyone when the list of permissions is empty (deny by default)', () => {
+    const { token } = open();
+
+    expect(refusal(() => requireFullSession(requestWith(token), { permission: [] })).code).toBe(
+      'AUTH_FORBIDDEN',
+    );
   });
 
   it('refuses a role that has no permissions at all', () => {

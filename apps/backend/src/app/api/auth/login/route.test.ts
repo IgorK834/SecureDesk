@@ -428,7 +428,7 @@ describe('POST /api/auth/login: logging', () => {
       'auth.login.failure',
       'auth.login.failure',
       'auth.login.failure',
-      'auth.login.invalid_request',
+      'auth.login.denied', // the malformed body, logged by the route wrapper like every refusal
     ]);
     for (const entry of entries) {
       expect(Object.keys(entry).sort()).toStrictEqual(['event', 'requestId']);
