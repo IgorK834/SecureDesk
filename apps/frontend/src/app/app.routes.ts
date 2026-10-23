@@ -70,7 +70,10 @@ export const routes: Routes = [
     path: 'admin/security',
     title: 'Security settings',
     ...requires('security-settings:read'),
-    loadComponent: placeholder,
+    loadComponent: () =>
+      import('./features/admin-security/security-settings.component').then(
+        (m) => m.SecuritySettingsComponent,
+      ),
   },
   { path: 'tickets', title: 'Tickets', ...requires(READ_TICKETS), loadComponent: placeholder },
   {
