@@ -224,7 +224,7 @@ A test (`schema/er-diagram.test.ts`) migrates an empty database and fails if thi
 | A ticket has one creator, at most one assignee       | `tickets.created_by_user_id` is `NOT NULL`; both it and the nullable `assigned_to_user_id` are foreign keys to `users.id`                    |
 | A ticket has one of three known statuses             | `CHECK` on `tickets.status`                                                                                                                  |
 | Who may read or change a ticket                      | not the database: `src/server/tickets/policy.ts` decides, see [permissions.md](permissions.md)                                               |
-| The permanent `ADMIN` account is protected           | triggers from migration `0001_protect_admin_account` (below) plus the service-layer checks of Task 4.3                                       |
+| The permanent `ADMIN` account is protected           | triggers from migration `0001_protect_admin_account` (below) plus `assertNotProtectedAccount` in `src/server/users/account-service.ts`       |
 | Accounts are never hard-deleted by the application   | soft delete through `users.deleted_at`; foreign keys from sessions and history keep pointing at a real row                                   |
 
 ### Notes

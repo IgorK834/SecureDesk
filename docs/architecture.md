@@ -204,6 +204,8 @@ A request stops at the first step that refuses it:
 - **Errors** share one envelope, `{ "error": { "code", "message" } }`, never cached, built in
   `server/http/errors.ts`: `UnauthorizedError` 401, `ForbiddenError` and
   `PasswordChangeRequiredError` 403, `ValidationError` 400, `NotFoundError` 404, `ConflictError` 409.
+  Domain refusals use an `ApiError` with their own code, such as `409 LOGIN_ALREADY_EXISTS` and
+  `409 PROTECTED_ACCOUNT` (see [User administration](#user-administration)).
   An unexpected error (a SQL failure included) is logged as an event name and a request id only,
   and answered with `500 INTERNAL_ERROR`: no stack, query or path leaves the server.
 - **A guardrail, not a convention.** `tests/route-guard-conformance.test.ts` imports every
@@ -238,6 +240,64 @@ change, block, delete and administrator reset). `rotateSession(db, session, stag
 session with a fresh token and a new stage in one transaction (use it when privileges change, for
 example after the forced password change). Login itself revokes a token the request already carried
 (session fixation).
+
+## User administration
+
+`app/api/admin/users/**`, Administrator only. Every endpoint is `FULLY_AUTHENTICATED` plus one
+permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `401`.
+
+| Endpoint                             | Permission     | Answer                                                  |
+| ------------------------------------ | -------------- | ------------------------------------------------------- |
+| `GET /api/admin/users`               | `users:read`   | `200 { items, page, pageSize, total }`                  |
+| `POST /api/admin/users`              | `users:create` | `201 { user, temporaryPassword: { value, expiresAt } }` |
+| `GET /api/admin/users/[id]`          | `users:read`   | `200` the account (`404` if missing or soft-deleted)    |
+| `PATCH /api/admin/users/[id]`        | `users:update` | `200` the updated account                               |
+| `DELETE /api/admin/users/[id]`       | `users:delete` | `204`, also when it was already deleted                 |
+| `POST /api/admin/users/[id]/block`   | `users:block`  | `200` the account, also when it was already blocked     |
+| `POST /api/admin/users/[id]/unblock` | `users:block`  | `200` the account, also when it was not blocked         |
+
+- **Strict allowlists both ways.** Responses are built by `toAdminUserDto` from named columns
+  (the query never loads `password_hash`); request bodies and queries are strict Zod schemas
+  (`server/users/schemas.ts`), so naming `passwordHash`, `isBlocked`, `login`, `role_id` or any
+  other key is a `400`, never silently ignored. The role is written as the upper-case role id
+  (`EMPLOYEE`); `ADMINISTRATOR` cannot be assigned through the API.
+- **List.** Query: `q` (login, first name, last name; at most 64 characters), `role`, `status`,
+  `page` (from 1) and `pageSize` (default 20, at most 100; a larger value is refused, not
+  clamped). Ordered by login. `%`, `_` and `\` in `q` are escaped (`LIKE ... ESCAPE '\'`), so they
+  match themselves. SQLite's `LIKE` ignores case for ASCII letters only: the login is compared in
+  its normalized form (`normalizeLogin`), but a name containing, say, `Ł` is matched by `Ł`, not `ł`.
+  Soft-deleted accounts are in no list, count or lookup.
+- **Status.** `blocked` is `is_blocked`; `pending` is not blocked and still owes the first password
+  change (`must_change_password`); `active` is neither. The three partition the live accounts: an
+  account that is blocked _and_ pending counts as `blocked`. The UI adds an "expired temporary
+  password" hint when `temporaryPasswordExpiresAt` is in the past.
+- **Create.** The temporary password is issued and hashed first (hashing is asynchronous, a
+  better-sqlite3 transaction is not) and the row is then written by one `INSERT`, atomic by
+  itself: there is never an account without its credential. A login that exists in any spelling is
+  `409 LOGIN_ALREADY_EXISTS`. The plaintext appears only in the `201` response (`no-store`).
+- **Block, unblock, delete** (`server/users/account-service.ts`) each run in one transaction and
+  call `revokeAllForUser`, so a blocked or deleted account loses every session at once. Repeating
+  any of them succeeds. A repeated delete keeps the time of the first one. Unblocking restores
+  login eligibility only: revoked sessions stay revoked and the password state is untouched, so an
+  account reset while blocked stays blocked until it is unblocked explicitly. A soft-deleted
+  account keeps its row and its reserved login, so tickets, history and sessions stay valid.
+- **The permanent `ADMIN` account** (`login_normalized = 'admin'`) cannot be blocked, deleted or
+  given another role, and nobody else can be given the Administrator role: `409
+PROTECTED_ACCOUNT` (`assertNotProtectedAccount`). The service checks first so the client gets a
+  proper error; the triggers in migration `0001` refuse the same changes if a bug ever gets past it.
+- **Screens** (`apps/frontend/.../features/admin-users`, typed client `core/http/admin-api.service.ts`):
+  the list at `/admin/users`, the account at `/admin/users/:id` (edit, block, unblock, delete) and
+  `/admin/users/new`. Which buttons appear follows `AuthService.has()` and the Block and Delete
+  buttons are disabled for the `ADMIN` login with the reason as a tooltip; both are only a
+  convenience, the server answers every call (`403`, `404`, `409` are shown as messages). Block,
+  unblock and delete ask first through `ConfirmDialogComponent` and state the consequence. The
+  temporary password goes straight to `TemporaryPasswordDialogComponent`: it is shown once, Escape
+  does not close it, it is removed from the page when closed, and it is never stored or logged.
+  These components use `@Input`, `@Output` and `@ViewChild`, not `input()`, `output()` and
+  `viewChild()`: the root Vitest run that gates coverage has no Angular compiler plugin, and
+  without it the initializer functions are not recognized.
+- **Not yet protected: CSRF.** These state-changing routes rely on `SameSite=Lax` on the session
+  cookie until SD-27 adds a CSRF check (see the note on `auth/logout`).
 
 ## Temporary passwords (variant 2)
 
