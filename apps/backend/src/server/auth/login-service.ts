@@ -81,8 +81,11 @@ export async function authenticate(input: LoginInput, ctx: LoginContext): Promis
     .where(and(eq(users.loginNormalized, normalizedLogin), isNull(users.deletedAt)))
     .get();
 
+  // Asked for on every attempt, known login or not: the first call in a process has to compute the
+  // hash, and if only unknown logins paid for that, the first attempt would show which logins exist.
+  const dummyHash = await getDummyHash();
   const passwordMatches = await verifyPassword(
-    user ? user.passwordHash : await getDummyHash(),
+    user ? user.passwordHash : dummyHash,
     input.password,
   );
   if (!user || !passwordMatches || user.isBlocked) return INVALID_CREDENTIALS;

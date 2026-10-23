@@ -10,9 +10,14 @@ import { getDummyHash, hashPassword, verifyPassword } from './password-hasher';
 import { hashSessionToken } from './session-service';
 
 // Wraps the real verification so calls can be counted: every attempt must cost exactly one.
+// `getDummyHash` is wrapped too, to see which attempts ask for it.
 vi.mock('./password-hasher', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./password-hasher')>();
-  return { ...actual, verifyPassword: vi.fn(actual.verifyPassword) };
+  return {
+    ...actual,
+    verifyPassword: vi.fn(actual.verifyPassword),
+    getDummyHash: vi.fn(actual.getDummyHash),
+  };
 });
 
 const PASSWORD = 'Correct horse battery staple';
@@ -33,6 +38,7 @@ beforeEach(() => {
   now = T0;
   setClockForTests({ now: () => now });
   vi.mocked(verifyPassword).mockClear();
+  vi.mocked(getDummyHash).mockClear();
 });
 
 afterEach(() => {
@@ -109,6 +115,24 @@ describe('refused logins', () => {
 
     expect(vi.mocked(verifyPassword).mock.calls[0]?.[0]).toBe(await getDummyHash());
   });
+
+  // The dummy hash is computed on its first use, and that costs one more Argon2 hash than a
+  // verification does. If only unknown logins asked for it, the first attempt after a restart
+  // would be slower exactly when the login does not exist, which is what it is there to hide.
+  it.each([
+    ['an unknown login', 'nobody', PASSWORD],
+    ['a known login with a wrong password', 'employee1', 'not the password'],
+    ['a known login with the right password', 'employee1', PASSWORD],
+  ])(
+    '%s asks for the dummy hash too, so the first attempt costs the same',
+    async (_, login, password) => {
+      addUser();
+
+      await attempt(login, password);
+
+      expect(getDummyHash).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it.each(["' OR '1'='1", "admin'--", "employee1' --", "'; DROP TABLE users; --", '" OR ""="'])(
     'treats the login %j as plain text: no match, no error, nothing damaged',

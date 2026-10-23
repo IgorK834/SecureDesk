@@ -82,6 +82,8 @@ preflight and could otherwise sign a victim into the attacker's account (login C
 3. The account is looked up by normalized login, ignoring soft-deleted accounts.
 4. **Exactly one** Argon2id verification happens, against the stored hash or, for an unknown
    login, against `getDummyHash()`, so response time does not show whether the login exists.
+   `getDummyHash()` is asked for on every attempt, known login or not: the first call in a process
+   computes it, and that extra hash must not be paid only by unknown logins.
 5. A blocked account, a wrong password, an unknown or deleted login and an expired temporary
    password all give the same result.
 6. The session stage is chosen: `INITIAL_PASSWORD_CHANGE` while `must_change_password` is set,
