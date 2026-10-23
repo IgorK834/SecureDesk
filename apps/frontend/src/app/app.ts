@@ -3,9 +3,10 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterOutlet } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 import { ApiClient } from './core/http/api-client.service';
+import { MainNav } from './shared/layout/main-nav';
 
 @Component({
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, MainNav],
   selector: 'app-root',
   styleUrl: './app.scss',
   templateUrl: './app.html',
