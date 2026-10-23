@@ -45,18 +45,26 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: placeholder,
   },
-  { path: 'admin/users', title: 'Users', ...requires('users:read'), loadComponent: placeholder },
+  {
+    path: 'admin/users',
+    title: 'Users',
+    ...requires('users:read'),
+    loadComponent: () =>
+      import('./features/admin-users/users-list.component').then((m) => m.UsersListComponent),
+  },
   {
     path: 'admin/users/new',
     title: 'New user',
     ...requires('users:create'),
-    loadComponent: placeholder,
+    loadComponent: () =>
+      import('./features/admin-users/user-form.component').then((m) => m.UserFormComponent),
   },
   {
     path: 'admin/users/:id',
     title: 'User account',
     ...requires('users:read'),
-    loadComponent: placeholder,
+    loadComponent: () =>
+      import('./features/admin-users/user-detail.component').then((m) => m.UserDetailComponent),
   },
   {
     path: 'admin/security',

@@ -5,7 +5,9 @@ import { ApplicationInitStatus } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { adminUser, userPage } from './__fixtures__/admin-users';
+import { installDialogPolyfill } from './__fixtures__/dialog';
 import { meResponse } from './__fixtures__/session';
 import { appConfig } from './app.config';
 import { routes } from './app.routes';
@@ -40,6 +42,12 @@ async function startApp(me: MeResponse | null) {
   const harness = await RouterTestingHarness.create();
   return {
     http,
+    harness,
+    /** Lets the promise chains that follow a click or a response run, then renders the result. */
+    async render() {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      harness.detectChanges();
+    },
     /** Opens a URL the way typing it into the address bar would; returns where the user ended up. */
     async open(url: string) {
       await harness.navigateByUrl(url);
@@ -220,5 +228,174 @@ describe('routes owned by later tasks', () => {
     await app.open('/admin/security');
 
     expect(app.page()).toContain('Security settings');
+  });
+});
+
+describe('the admin user pages, wired to the real HTTP client', () => {
+  beforeAll(installDialogPolyfill);
+
+  const isUsers = (r: { url: string }) => r.url.startsWith('/api/admin/users');
+  const created = adminUser({
+    id: 'u-new',
+    login: 'new.user',
+    firstName: 'Nowy',
+    lastName: 'Użytkownik',
+    role: 'GUEST',
+    mustChangePassword: true,
+  });
+
+  type App = Awaited<ReturnType<typeof startApp>>;
+  const root = (app: App) => app.harness.routeNativeElement as HTMLElement;
+  const click = (app: App, label: string) =>
+    [...root(app).querySelectorAll('button')].find((b) => b.textContent?.trim() === label)?.click();
+
+  it('lists the accounts: one GET with the page and its size, then the rows', async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/users');
+    app.harness.detectChanges();
+
+    const request = app.http.expectOne(isUsers);
+    expect(request.request.method).toBe('GET');
+    expect(request.request.url).toBe('/api/admin/users');
+    expect(request.request.params.get('page')).toBe('1');
+    expect(request.request.params.get('pageSize')).toBe('20');
+    request.flush(userPage([adminUser({ login: 'jan.k' })]));
+    await app.render();
+
+    expect(app.page()).toContain('jan.k');
+  });
+
+  it('turns a Manager away without asking the server for any user data', async () => {
+    const app = await startApp(meResponse('MANAGER'));
+
+    expect(await app.open('/admin/users')).toBe('/forbidden');
+    await app.render();
+
+    app.http.expectNone(isUsers);
+    expect(app.page()).toContain('Access denied');
+  });
+
+  it("shows the server's 403 as a message even though the session said the page is allowed", async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/users');
+    app.harness.detectChanges();
+
+    app.http
+      .expectOne(isUsers)
+      .flush(
+        { error: { code: 'AUTH_FORBIDDEN', message: 'x' } },
+        { status: 403, statusText: 'Forbidden' },
+      );
+    await app.render();
+
+    expect(app.page()).toContain('not allowed to view users');
+  });
+
+  it('shows the not-found page for an account the server does not have (404)', async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/users/42');
+    app.harness.detectChanges();
+
+    const request = app.http.expectOne('/api/admin/users/42');
+    expect(request.request.method).toBe('GET');
+    request.flush(
+      { error: { code: 'NOT_FOUND', message: 'x' } },
+      { status: 404, statusText: 'Not Found' },
+    );
+    await app.render();
+
+    expect(app.page()).toContain('Page not found');
+  });
+
+  it('creates an account: POSTs the trimmed form, shows the password once, then opens the account', async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/users/new');
+    app.harness.detectChanges();
+    const set = (id: string, value: string, event: string) => {
+      const control = root(app).querySelector(`#${id}`) as HTMLInputElement;
+      control.value = value;
+      control.dispatchEvent(new Event(event));
+    };
+    set('user-login', ' new.user ', 'input');
+    set('user-first-name', 'Nowy', 'input');
+    set('user-last-name', 'Użytkownik', 'input');
+    set('user-role', 'GUEST', 'change');
+
+    click(app, 'Create account');
+
+    const post = app.http.expectOne(isUsers);
+    expect(post.request.method).toBe('POST');
+    expect(post.request.url).toBe('/api/admin/users');
+    expect(post.request.body).toStrictEqual({
+      login: 'new.user',
+      firstName: 'Nowy',
+      lastName: 'Użytkownik',
+      role: 'GUEST',
+    });
+    post.flush(
+      {
+        user: created,
+        temporaryPassword: { value: 'Tmp-Secret-9xQ4zLm2', expiresAt: '2030-01-02T00:00:00.000Z' },
+      },
+      { status: 201, statusText: 'Created' },
+    );
+    await app.render();
+    expect(root(app).querySelector('dialog')?.textContent).toContain('Tmp-Secret-9xQ4zLm2');
+    expect(TestBed.inject(Router).url).toBe('/admin/users/new');
+
+    click(app, 'I have saved the password');
+    await app.render();
+
+    expect(TestBed.inject(Router).url).toBe('/admin/users/u-new');
+    app.http.expectOne('/api/admin/users/u-new').flush(created);
+    await app.render();
+    expect(app.page()).toContain('new.user');
+    expect(app.page()).not.toContain('Tmp-Secret-9xQ4zLm2');
+  });
+
+  it('blocks an account: confirms, POSTs with no body, then shows it blocked', async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/users/u-1');
+    app.harness.detectChanges();
+    app.http.expectOne('/api/admin/users/u-1').flush(adminUser({ id: 'u-1' }));
+    await app.render();
+
+    click(app, 'Block');
+    await app.render();
+    app.http.expectNone((r) => r.method === 'POST');
+    click(app, 'Block account');
+    await app.render();
+
+    const post = app.http.expectOne((r) => r.method === 'POST');
+    expect(post.request.url).toBe('/api/admin/users/u-1/block');
+    expect(post.request.body).toBeNull();
+    post.flush(adminUser({ id: 'u-1', isBlocked: true }));
+    await app.render();
+    expect(root(app).querySelector('app-user-status-badge')?.textContent).toContain('Blocked');
+  });
+
+  it('deletes an account: confirms, sends DELETE, then returns to a list that asks the server again', async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/users/u-1');
+    app.harness.detectChanges();
+    app.http.expectOne('/api/admin/users/u-1').flush(adminUser({ id: 'u-1' }));
+    await app.render();
+
+    click(app, 'Delete');
+    await app.render();
+    click(app, 'Delete account');
+    await app.render();
+
+    const del = app.http.expectOne((r) => r.method === 'DELETE');
+    expect(del.request.url).toBe('/api/admin/users/u-1');
+    del.flush(null, { status: 204, statusText: 'No Content' });
+    await app.render();
+
+    expect(TestBed.inject(Router).url).toBe('/admin/users');
+    const list = app.http.expectOne(isUsers);
+    expect(list.request.method).toBe('GET');
+    list.flush(userPage([]));
+    await app.render();
+    expect(app.page()).toContain('No users match these filters.');
   });
 });
