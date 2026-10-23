@@ -1,5 +1,5 @@
 import { and, desc, eq, notInArray } from 'drizzle-orm';
-import type { AppDb } from '../db/connection';
+import type { AppDb, AppTransaction } from '../db/connection';
 import { type UserRow, passwordHistory, users } from '../db/schema';
 import { ApiError } from '../http/errors';
 import { readSecuritySettings } from '../security/settings';
@@ -122,6 +122,30 @@ export async function assertNotReused(
   }
 }
 
+/**
+ * Files the hash of a regular password the user is leaving behind under their history, then cuts
+ * the history back to the `PASSWORD_HISTORY_SIZE` newest entries. Call it inside the transaction
+ * that replaces the password, so the old hash is never lost or kept twice. Never pass a temporary
+ * password's hash: it was not chosen by the user and must not count against what they may pick.
+ * Shared by the ordinary password change and the administrator's reset.
+ */
+export function rememberPasswordHash(
+  tx: AppTransaction,
+  userId: string,
+  passwordHash: string,
+): void {
+  tx.insert(passwordHistory).values({ userId, passwordHash }).run();
+  const newest = tx
+    .select({ id: passwordHistory.id })
+    .from(passwordHistory)
+    .where(eq(passwordHistory.userId, userId))
+    .orderBy(desc(passwordHistory.createdAt), desc(passwordHistory.id))
+    .limit(PASSWORD_HISTORY_SIZE);
+  tx.delete(passwordHistory)
+    .where(and(eq(passwordHistory.userId, userId), notInArray(passwordHistory.id, newest)))
+    .run();
+}
+
 function toResult(user: UserRow, created: CreatedSession): PasswordChangeResult {
   return {
     user: toProfile(user),
@@ -171,20 +195,7 @@ export async function changePassword(
       if (changes === 0) throw alreadyCompleted();
 
       // A temporary password is never remembered: it was not chosen by the user.
-      if (!user.mustChangePassword) {
-        tx.insert(passwordHistory)
-          .values({ userId: user.id, passwordHash: user.passwordHash })
-          .run();
-        const newest = tx
-          .select({ id: passwordHistory.id })
-          .from(passwordHistory)
-          .where(eq(passwordHistory.userId, user.id))
-          .orderBy(desc(passwordHistory.createdAt), desc(passwordHistory.id))
-          .limit(PASSWORD_HISTORY_SIZE);
-        tx.delete(passwordHistory)
-          .where(and(eq(passwordHistory.userId, user.id), notInArray(passwordHistory.id, newest)))
-          .run();
-      }
+      if (!user.mustChangePassword) rememberPasswordHash(tx, user.id, user.passwordHash);
 
       revokeAllForUser(tx, user.id);
       return createSession(tx, user.id, 'FULLY_AUTHENTICATED');

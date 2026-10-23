@@ -225,9 +225,10 @@ describe('routes owned by later tasks', () => {
   it('open a titled placeholder rather than a blank page', async () => {
     const app = await startApp(meResponse('ADMINISTRATOR'));
 
-    await app.open('/admin/security');
+    await app.open('/account/change-password');
 
-    expect(app.page()).toContain('Security settings');
+    expect(app.page()).toContain('Change password');
+    expect(app.page()).toContain('This page is not available yet.');
   });
 });
 
@@ -397,5 +398,122 @@ describe('the admin user pages, wired to the real HTTP client', () => {
     list.flush(userPage([]));
     await app.render();
     expect(app.page()).toContain('No users match these filters.');
+  });
+
+  it('resets a password: confirms, POSTs an empty JSON object, shows the password once, then drops it', async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/users/u-1');
+    app.harness.detectChanges();
+    app.http.expectOne('/api/admin/users/u-1').flush(adminUser({ id: 'u-1' }));
+    await app.render();
+
+    click(app, 'Reset password');
+    await app.render();
+    app.http.expectNone((r) => r.method === 'POST');
+    (
+      root(app).querySelector(
+        'dialog[aria-labelledby="confirm-dialog-title"] button.confirm',
+      ) as HTMLButtonElement
+    ).click();
+    await app.render();
+
+    const post = app.http.expectOne((r) => r.method === 'POST');
+    expect(post.request.url).toBe('/api/admin/users/u-1/reset-password');
+    expect(post.request.body).toStrictEqual({});
+    post.flush({
+      temporaryPassword: { value: 'Reset-Secret-4wNq8Tz1', expiresAt: '2030-01-01T12:00:00.000Z' },
+    });
+    await app.render();
+    expect(root(app).querySelector('output')?.textContent).toBe('Reset-Secret-4wNq8Tz1');
+    expect(TestBed.inject(Router).url).toBe('/admin/users/u-1');
+
+    click(app, 'I have saved the password');
+    await app.render();
+
+    expect(app.page()).not.toContain('Reset-Secret-4wNq8Tz1');
+    expect(TestBed.inject(Router).url).toBe('/admin/users/u-1');
+  });
+});
+
+describe('the security settings page, wired to the real HTTP client', () => {
+  const URL = '/api/admin/security-settings';
+  const SETTINGS = {
+    minPasswordLength: 12,
+    rejectPersonalDataInPassword: false,
+    passwordMaxAgeDays: null,
+    sessionIdleTimeoutMinutes: 15,
+  };
+  type App = Awaited<ReturnType<typeof startApp>>;
+  const root = (app: App) => app.harness.routeNativeElement as HTMLElement;
+  const field = (app: App, id: string) => root(app).querySelector(`#${id}`) as HTMLInputElement;
+
+  it('loads the settings with one GET and shows them', async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/security');
+    app.harness.detectChanges();
+
+    const request = app.http.expectOne(URL);
+    expect(request.request.method).toBe('GET');
+    request.flush({ ...SETTINGS, minPasswordLength: 20, passwordMaxAgeDays: 90 });
+    await app.render();
+
+    expect(app.page()).toContain('Security settings');
+    expect(field(app, 'min-password-length').value).toBe('20');
+    expect(field(app, 'max-age').value).toBe('90');
+    expect(field(app, 'idle-timeout').value).toBe('15');
+  });
+
+  it('saves with one PATCH carrying all four values, then shows what the server stored', async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/security');
+    app.harness.detectChanges();
+    app.http.expectOne(URL).flush(SETTINGS);
+    await app.render();
+    const min = field(app, 'min-password-length');
+    min.value = '16';
+    min.dispatchEvent(new Event('input'));
+    const personal = field(app, 'reject-personal-data');
+    personal.checked = true;
+    personal.dispatchEvent(new Event('change'));
+
+    (root(app).querySelector('button[type="submit"]') as HTMLButtonElement).click();
+
+    const patch = app.http.expectOne((r) => r.method === 'PATCH');
+    expect(patch.request.url).toBe(URL);
+    expect(patch.request.body).toStrictEqual({
+      minPasswordLength: 16,
+      rejectPersonalDataInPassword: true,
+      passwordMaxAgeDays: null,
+      sessionIdleTimeoutMinutes: 15,
+    });
+    patch.flush({ ...SETTINGS, minPasswordLength: 16, rejectPersonalDataInPassword: true });
+    await app.render();
+    expect(app.page()).toContain('Settings saved.');
+  });
+
+  it('turns a Manager away without asking the server for the settings', async () => {
+    const app = await startApp(meResponse('MANAGER'));
+
+    expect(await app.open('/admin/security')).toBe('/forbidden');
+    await app.render();
+
+    app.http.expectNone(URL);
+    expect(app.page()).toContain('Access denied');
+  });
+
+  it("shows the server's 403 as a message even though the session said the page is allowed", async () => {
+    const app = await startApp(meResponse('ADMINISTRATOR'));
+    await app.open('/admin/security');
+    app.harness.detectChanges();
+
+    app.http
+      .expectOne(URL)
+      .flush(
+        { error: { code: 'AUTH_FORBIDDEN', message: 'x' } },
+        { status: 403, statusText: 'Forbidden' },
+      );
+    await app.render();
+
+    expect(app.page()).toContain('Could not load the settings. You are not allowed to do this.');
   });
 });

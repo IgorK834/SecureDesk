@@ -323,6 +323,27 @@ describe('GET /api/tickets: paging', () => {
     expect(result.total).toBe(3); // B, C and E; the other two exist but are not theirs
   });
 
+  // The filter belongs in the query, before LIMIT and OFFSET. Applied to a page afterwards, it
+  // leaves short or empty pages in the middle (employee1's tickets are E, C, B, but D sits between
+  // E and C in the whole list) and `total` no longer matches what the pages add up to.
+  it.each<[login: string, keys: TicketKey[]]>([
+    ['employee1', [E, C, B]],
+    ['employee2', [D]],
+    ['guest2', [B]],
+  ])(
+    '%s: every page is full and the pages add up to exactly their own tickets',
+    async (login, keys) => {
+      const pages: string[][] = [];
+      for (let offset = 0; offset < keys.length; offset += 2) {
+        pages.push(await idsOfPage(`?limit=2&offset=${offset}`, login));
+      }
+
+      expect(pages.flat()).toEqual(keys.map(idOf));
+      expect(pages.slice(0, -1).every((page) => page.length === 2)).toBe(true);
+      expect(await idsOfPage(`?limit=2&offset=${keys.length}`, login)).toEqual([]);
+    },
+  );
+
   it('answers a page past the end with no items, not an error', async () => {
     expect(await idsOfPage('?offset=5')).toEqual([]);
     expect(await idsOfPage('?offset=9007199254740991')).toEqual([]);

@@ -97,7 +97,7 @@ describe.each(targets)('$label', ({ route, method, module }) => {
 });
 
 describe('the admin routes the matrix covers', () => {
-  it('are all of the user-management endpoints, so the matrix above cannot be empty by accident', () => {
+  it('are all of the admin endpoints, so the matrix above cannot be empty by accident', () => {
     expect(targets.map(({ label }) => label).sort()).toEqual(
       [
         'GET /api/admin/users',
@@ -107,6 +107,9 @@ describe('the admin routes the matrix covers', () => {
         'DELETE /api/admin/users/[id]',
         'POST /api/admin/users/[id]/block',
         'POST /api/admin/users/[id]/unblock',
+        'POST /api/admin/users/[id]/reset-password',
+        'GET /api/admin/security-settings',
+        'PATCH /api/admin/security-settings',
       ].sort(),
     );
   });

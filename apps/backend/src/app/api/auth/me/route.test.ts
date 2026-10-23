@@ -8,7 +8,7 @@ import { captureOutput } from '../../../../server/__fixtures__/capture-output';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
 import { insertUser } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
-import { type AuthStage, sessions, users } from '../../../../server/db/schema';
+import { type AuthStage, securitySettings, sessions, users } from '../../../../server/db/schema';
 import { seedRbac } from '../../../../server/db/seeds/rbac';
 import { ROLES } from '../../../../server/permissions/codes';
 import { ROLE_PERMISSIONS } from '../../../../server/permissions/matrix';
@@ -45,7 +45,7 @@ const me = (token?: string) =>
 const open = (stage: AuthStage = 'FULLY_AUTHENTICATED') => createSession(db, userId, stage);
 
 describe('GET /api/auth/me: signed in', () => {
-  it('returns the profile, the stage, the password-change flag and the role’s permissions', async () => {
+  it('returns the profile, the stage, the password-change flag, the role’s permissions and the password policy', async () => {
     const { token } = open();
 
     const response = await me(token);
@@ -64,6 +64,7 @@ describe('GET /api/auth/me: signed in', () => {
       authStage: 'FULLY_AUTHENTICATED',
       mustChangePassword: false,
       permissions: [...ROLE_PERMISSIONS[ROLES.EMPLOYEE]].sort(),
+      passwordPolicy: { minPasswordLength: 12, rejectPersonalDataInPassword: false },
     });
   });
 
@@ -89,6 +90,51 @@ describe('GET /api/auth/me: signed in', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ authStage: stage, mustChangePassword });
+  });
+
+  // The screen that forces a password change is the one that needs the hint (how long, whether
+  // login and name are banned), and it is shown to a session that can reach no other endpoint.
+  // The values are the administrator's current ones, read on every call, not the defaults.
+  it.each<AuthStage>(['INITIAL_PASSWORD_CHANGE', 'PASSWORD_EXPIRED', 'FULLY_AUTHENTICATED'])(
+    'tells a %s session the current password policy, and nothing else from the security settings',
+    async (stage) => {
+      db.insert(securitySettings)
+        .values({
+          id: 1,
+          minPasswordLength: 16,
+          rejectPersonalDataInPassword: true,
+          passwordMaxAgeDays: 90,
+          sessionIdleTimeoutMinutes: 5,
+        })
+        .run();
+      const { token } = open(stage);
+
+      const body = (await (await me(token)).json()) as Record<string, unknown>;
+
+      expect(body.passwordPolicy).toStrictEqual({
+        minPasswordLength: 16,
+        rejectPersonalDataInPassword: true,
+      });
+      expect(JSON.stringify(body)).not.toMatch(/passwordMaxAgeDays|sessionIdleTimeout|\b90\b/);
+    },
+  );
+
+  it('follows a change of the settings on the very next call', async () => {
+    const { token } = open();
+    db.insert(securitySettings).values({ id: 1, minPasswordLength: 14 }).run();
+    const before = (await (await me(token)).json()) as {
+      passwordPolicy: { minPasswordLength: number };
+    };
+
+    db.update(securitySettings).set({ minPasswordLength: 20 }).run();
+    const after = (await (await me(token)).json()) as {
+      passwordPolicy: { minPasswordLength: number };
+    };
+
+    expect([
+      before.passwordPolicy.minPasswordLength,
+      after.passwordPolicy.minPasswordLength,
+    ]).toStrictEqual([14, 20]);
   });
 
   it('counts as activity and so keeps an idle session alive', async () => {

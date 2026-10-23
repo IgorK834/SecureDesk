@@ -50,6 +50,33 @@ describe('TemporaryPasswordDialogComponent', () => {
     expect(root.textContent).toMatch(/Valid until .*2030/);
   });
 
+  it('says an account was created when it is not told otherwise, and when told so', () => {
+    for (const details of [DETAILS, { ...DETAILS, reason: 'created' as const }]) {
+      TestBed.resetTestingModule();
+      const { component, root, flush } = setUp();
+
+      void component.open(details);
+      flush();
+
+      expect(root.textContent).toContain('has been created');
+      expect(root.textContent).not.toContain('has been reset');
+    }
+  });
+
+  it('says a password was reset, and that the old one no longer works, after a reset', () => {
+    const { component, root, flush } = setUp();
+
+    void component.open({ ...DETAILS, reason: 'reset' });
+    flush();
+
+    expect(root.textContent).toContain('The password of newbie has been reset');
+    expect(root.textContent).toContain('old one no longer works');
+    expect(root.textContent).not.toContain('has been created');
+    // Whatever the reason, it is the same one-time reveal.
+    expect(root.querySelector('output')?.textContent).toBe(PASSWORD);
+    expect(root.textContent).toContain('only once');
+  });
+
   it('ignores Escape: the password cannot be dismissed by accident', () => {
     const { component, dialog, root, flush } = setUp();
     void component.open(DETAILS);

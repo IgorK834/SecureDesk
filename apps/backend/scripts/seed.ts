@@ -6,7 +6,7 @@ async function main(): Promise<void> {
   try {
     const { db } = await import('../src/server/db/client');
     const { seedDatabase } = await import('../src/server/db/seeds');
-    const { INITIAL_CREDENTIALS_FILE, appendInitialCredentials, prepareCredentialsDir } =
+    const { INITIAL_CREDENTIALS_FILE, appendInitialCredentials, prepareCredentialsFile } =
       await import('../src/server/db/seeds/credentials-file');
     const { clock } = await import('../src/server/time/clock');
 
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
     // Test runs read the passwords from seedDatabase()'s return value; nothing is written to disk.
     const persist = process.env.NODE_ENV !== 'test';
     const file = path.resolve(INITIAL_CREDENTIALS_FILE);
-    if (persist) prepareCredentialsDir(file);
+    if (persist) prepareCredentialsFile(file);
 
     // Demo tickets are for development and test databases only.
     const demoTickets = process.env.NODE_ENV !== 'production';

@@ -65,13 +65,14 @@ Rules:
 
 ```bash
 npm run db:reset:dev      # removes the DATABASE_PATH file plus -wal and -shm
+npm run db:migrate        # rebuilds the development schema from scratch
 npm run db:reset:test     # removes the TEST_DATABASE_PATH file plus -wal and -shm
-npm run db:migrate        # rebuilds the schema from scratch
+npm run db:migrate:test   # rebuilds the test schema from scratch (NODE_ENV=test)
 ```
 
-The reset deletes only the resolved file and its two companions, prints each file it removed, and refuses to run when `NODE_ENV=production`. Resetting the test database never touches the development database (and vice versa).
+The reset deletes only the resolved file and its two companions, prints each file it removed, and refuses to run when `NODE_ENV=production`. Resetting the test database never touches the development database (and vice versa). The two reset scripts pass `dev` or `test` to `scripts/reset-db.ts` instead of setting `NODE_ENV` inline: an inline `NODE_ENV=development` would overwrite a `production` set by the caller before the refusal could see it, and the scripts would delete the database anyway. `NODE_ENV` is only read by that refusal; the argument chooses the file.
 
-To rebuild a machine from nothing: `npm ci`, `cp .env.example .env`, `npm run db:migrate`.
+To rebuild a machine from nothing: `npm ci`, `cp .env.example .env`, `npm run db:migrate`. For the test database: `npm run db:migrate:test`, then `npm run db:seed:test`.
 
 ## Errors returned to clients
 
@@ -93,7 +94,7 @@ Drizzle can wrap the driver error and put the SQLite code on `cause`, so the who
 
 ```bash
 npm run db:migrate && npm run db:seed        # development database
-npm run db:seed:test                         # test database (NODE_ENV=test)
+npm run db:migrate:test && npm run db:seed:test   # test database (NODE_ENV=test)
 ```
 
 The seed (`src/server/db/seeds/`, entry point `scripts/seed.ts`) creates, in one transaction:
@@ -112,11 +113,11 @@ Rules:
 - **Demo tickets.** In development and test databases (any `NODE_ENV` except `production`) the seed also creates five tickets with fixed ids, one for each way a ticket can relate to the seed accounts (`src/server/db/seeds/tickets.ts`; who sees which one is in [permissions.md](permissions.md#who-sees-the-seeded-tickets)). A ticket that already exists is left exactly as it is, so a re-run never resets a status or an assignee that someone changed. In production the seed creates no tickets.
 - **First login.** Every seeded account has `must_change_password = 1`. The six test users also get `temporary_password_expires_at` = the time the password was issued + 12 hours.
 - **Delivery.** The plaintext of newly created accounts is appended to `apps/backend/.local/initial-credentials.txt` (git-ignored; directory `0700`, file `0600`). The seed prints that path and counts, never a password or hash. Delete the file once the passwords are changed. With `NODE_ENV=test` nothing is written to disk; `seedDatabase(db)` returns the passwords to the calling test.
-- **Failure.** The credentials directory is created before any account, so a permission problem aborts the run first. A failing run prints only the error message, and a test asserts that a failing insert never prints a hash or SQL, so a Drizzle upgrade that starts adding statements or parameters to error messages fails that test instead of leaking hashes to the console.
+- **Failure.** Before any account is created the seed checks that the credentials file can be written (or, when there is no file yet, its directory), so a permission problem aborts the run with nothing committed. A file that was made read-only on purpose is reported, not made writable. The check cannot see a disk that fills up between it and the write: the accounts then exist without a saved password, and the way out is the one described under ADMIN below. A failing run prints only the error message, and a test asserts that a failing insert never prints a hash or SQL, so a Drizzle upgrade that starts adding statements or parameters to error messages fails that test instead of leaking hashes to the console.
 
 ### ADMIN does not lapse after 12 hours
 
-`ADMIN` is the one account no other administrator can reset, so its initial password has `temporary_password_expires_at = NULL`: it stays valid until ADMIN changes it, which is still forced at first login (`must_change_password = 1`). The login flow (Task 2.x) must therefore treat `must_change_password = 1` with a `NULL` expiry as "valid initial password, no deadline". The 12-hour rule remains mandatory for credentials issued through the admin panel (create user, reset password). If the credentials file is lost before the first login, there is no in-app recovery for ADMIN: run `npm run db:reset:dev && npm run db:migrate && npm run db:seed` on the development database.
+`ADMIN` is the one account no other administrator can reset, so its initial password has `temporary_password_expires_at = NULL`: it stays valid until ADMIN changes it, which is still forced at first login (`must_change_password = 1`). The login flow (Task 2.x) must therefore treat `must_change_password = 1` with a `NULL` expiry as "valid initial password, no deadline". The 12-hour rule remains mandatory for credentials issued through the admin panel (create user, reset password). That includes a reset of ADMIN itself, which the admin panel allows (only ADMIN can do it): the new password lapses after 12 hours like any other, and if it lapses unused nobody can issue another (see [User administration](architecture.md#user-administration)). If the credentials file is lost before the first login, there is no in-app recovery for ADMIN: run `npm run db:reset:dev && npm run db:migrate && npm run db:seed` on the development database.
 
 This seed creates six test accounts and is meant for development and review databases. A production bootstrap that creates only `ADMIN` is not part of this task.
 

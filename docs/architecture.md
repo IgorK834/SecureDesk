@@ -82,6 +82,8 @@ preflight and could otherwise sign a victim into the attacker's account (login C
 3. The account is looked up by normalized login, ignoring soft-deleted accounts.
 4. **Exactly one** Argon2id verification happens, against the stored hash or, for an unknown
    login, against `getDummyHash()`, so response time does not show whether the login exists.
+   `getDummyHash()` is asked for on every attempt, known login or not: the first call in a process
+   computes it, and that extra hash must not be paid only by unknown logins.
 5. A blocked account, a wrong password, an unknown or deleted login and an expired temporary
    password all give the same result.
 6. The session stage is chosen: `INITIAL_PASSWORD_CHANGE` while `must_change_password` is set,
@@ -226,9 +228,13 @@ the role's permissions. Its refusals:
 ### Endpoints
 
 - `GET /api/auth/me`: open to every stage. Returns `{ user, authStage, mustChangePassword,
-permissions }` (`user` is the same five fields as the login response). `mustChangePassword` is the
-  account flag, as in the login response; clients should decide from `authStage`, which also covers
-  an expired password.
+permissions, passwordPolicy }` (`user` is the same five fields as the login response).
+  `mustChangePassword` is the account flag, as in the login response; clients should decide from
+  `authStage`, which also covers an expired password. `passwordPolicy` is `{ minPasswordLength,
+rejectPersonalDataInPassword }`, the current values from the security settings, read on every call.
+  A session that still has to change its password gets it too, because the screen that forces the
+  change needs the hint and the session can reach no other endpoint. The other two settings (password
+  expiry, idle timeout) are not part of it.
 - `POST /api/auth/logout`: open to every stage, so a user who must change the password can still
   sign out. Revokes the caller's session only (other devices stay signed in), clears the cookie and
   answers `204`. Without a valid session it answers `401`, not a silent success.
@@ -246,15 +252,16 @@ example after the forced password change). Login itself revokes a token the requ
 `app/api/admin/users/**`, Administrator only. Every endpoint is `FULLY_AUTHENTICATED` plus one
 permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `401`.
 
-| Endpoint                             | Permission     | Answer                                                  |
-| ------------------------------------ | -------------- | ------------------------------------------------------- |
-| `GET /api/admin/users`               | `users:read`   | `200 { items, page, pageSize, total }`                  |
-| `POST /api/admin/users`              | `users:create` | `201 { user, temporaryPassword: { value, expiresAt } }` |
-| `GET /api/admin/users/[id]`          | `users:read`   | `200` the account (`404` if missing or soft-deleted)    |
-| `PATCH /api/admin/users/[id]`        | `users:update` | `200` the updated account                               |
-| `DELETE /api/admin/users/[id]`       | `users:delete` | `204`, also when it was already deleted                 |
-| `POST /api/admin/users/[id]/block`   | `users:block`  | `200` the account, also when it was already blocked     |
-| `POST /api/admin/users/[id]/unblock` | `users:block`  | `200` the account, also when it was not blocked         |
+| Endpoint                                    | Permission             | Answer                                                                               |
+| ------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------ |
+| `GET /api/admin/users`                      | `users:read`           | `200 { items, page, pageSize, total }`                                               |
+| `POST /api/admin/users`                     | `users:create`         | `201 { user, temporaryPassword: { value, expiresAt } }`                              |
+| `GET /api/admin/users/[id]`                 | `users:read`           | `200` the account (`404` if missing or soft-deleted)                                 |
+| `PATCH /api/admin/users/[id]`               | `users:update`         | `200` the updated account                                                            |
+| `DELETE /api/admin/users/[id]`              | `users:delete`         | `204`, also when it was already deleted                                              |
+| `POST /api/admin/users/[id]/block`          | `users:block`          | `200` the account, also when it was already blocked                                  |
+| `POST /api/admin/users/[id]/unblock`        | `users:block`          | `200` the account, also when it was not blocked                                      |
+| `POST /api/admin/users/[id]/reset-password` | `users:reset-password` | `200 { temporaryPassword: { value, expiresAt } }` (`404` if missing or soft-deleted) |
 
 - **Strict allowlists both ways.** Responses are built by `toAdminUserDto` from named columns
   (the query never loads `password_hash`); request bodies and queries are strict Zod schemas
@@ -281,18 +288,45 @@ permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `
   login eligibility only: revoked sessions stay revoked and the password state is untouched, so an
   account reset while blocked stays blocked until it is unblocked explicitly. A soft-deleted
   account keeps its row and its reserved login, so tickets, history and sessions stay valid.
+- **Reset password** (`resetPassword` in `server/users/account-service.ts`). The body is the empty
+  JSON object `{}`: the schema is strict, so a password in the body is a `400`, and a bodyless or
+  form post is a `400` too (the route requires `application/json`), which also keeps a plain
+  cross-site form from triggering it until SD-27. The temporary credential is issued and hashed
+  first, as in create, so its 12 hours count from the call. One `BEGIN IMMEDIATE` transaction then
+  loads the account (`404` if missing or soft-deleted), files the hash being replaced in the
+  password history when it is a regular password (`must_change_password = 0`; a temporary
+  password is never filed) through `rememberPasswordHash`, the helper `changePassword` uses too,
+  applies the credential and revokes every session of the account: all of it or none of it.
+  `is_blocked` and `deleted_at` are not touched, so resetting a blocked account does not unblock
+  it. The answer is `no-store`; the plaintext is in that body only, never in a log or a table.
+  Afterwards the user's old password no longer signs in, the previous regular password cannot be
+  chosen again, and the temporary one must be replaced through `change-initial-password`.
+- **Resetting the permanent `ADMIN` account is allowed**, like any other (a decision, not an
+  oversight; the alternative was `409 PROTECTED_ACCOUNT`). Only ADMIN can do it, so it ends ADMIN's
+  own session, and the new password lapses after 12 hours like every reset password. Two
+  consequences follow. **Lockout:** the password is shown once; if it is lost, or lapses unused,
+  no other account can reset ADMIN, and there is no in-app recovery (a development database is
+  rebuilt with `db:reset:dev`, as in [database-schema.md](database-schema.md#admin-does-not-lapse-after-12-hours)).
+  **Takeover:** a stolen ADMIN session can reset the password and then, because the forced change
+  asks for no current password, choose a new one, without ever knowing the old one; every other
+  session is revoked in the process. The confirmation dialog warns about the first.
 - **The permanent `ADMIN` account** (`login_normalized = 'admin'`) cannot be blocked, deleted or
   given another role, and nobody else can be given the Administrator role: `409
 PROTECTED_ACCOUNT` (`assertNotProtectedAccount`). The service checks first so the client gets a
   proper error; the triggers in migration `0001` refuse the same changes if a bug ever gets past it.
 - **Screens** (`apps/frontend/.../features/admin-users`, typed client `core/http/admin-api.service.ts`):
-  the list at `/admin/users`, the account at `/admin/users/:id` (edit, block, unblock, delete) and
-  `/admin/users/new`. Which buttons appear follows `AuthService.has()` and the Block and Delete
-  buttons are disabled for the `ADMIN` login with the reason as a tooltip; both are only a
-  convenience, the server answers every call (`403`, `404`, `409` are shown as messages). Block,
-  unblock and delete ask first through `ConfirmDialogComponent` and state the consequence. The
-  temporary password goes straight to `TemporaryPasswordDialogComponent`: it is shown once, Escape
-  does not close it, it is removed from the page when closed, and it is never stored or logged.
+  the list at `/admin/users`, the account at `/admin/users/:id` (edit, reset password, block,
+  unblock, delete) and `/admin/users/new`. Which buttons appear follows `AuthService.has()` and the
+  Block and Delete buttons are disabled for the `ADMIN` login with the reason as a tooltip; both
+  are only a convenience, the server answers every call (`403`, `404`, `409` are shown as
+  messages). Reset password stays available for `ADMIN`. Reset, block, unblock and delete ask first
+  through `ConfirmDialogComponent` and state the consequence (a blocked account is told it stays
+  blocked, `ADMIN` that nobody else can reset it). The temporary password, after a create or a
+  reset, goes straight to `TemporaryPasswordDialogComponent`: it is shown once, Escape does not
+  close it, it is removed from the page when closed, and it is never stored, logged, put in the
+  URL or in router state. After a reset the page shows the account as awaiting its first password
+  change with the new deadline (patched locally from the answer: `Last changed` is not refreshed
+  until the page is loaded again).
   These components use `@Input`, `@Output` and `@ViewChild`, not `input()`, `output()` and
   `viewChild()`: the root Vitest run that gates coverage has no Angular compiler plugin, and
   without it the initializer functions are not recognized.
@@ -318,7 +352,7 @@ expiresAt }`. The plaintext is shown once to the administrator in a `Cache-Contr
 - **Applying it.** `applyTemporaryCredential(tx, userId, credential)` sets `password_hash`,
   `must_change_password = 1`, `temporary_password_expires_at` and `updated_at`, and throws if the
   user does not exist. It does not end the user's sessions: a caller resetting an existing account
-  should call `revokeAllForUser` in the same transaction.
+  should call `revokeAllForUser` in the same transaction, as `resetPassword` does.
 - **Randomness is enforced.** ESLint bans `Math.random` under `apps/backend/src/server/**`;
   `tests/eslint-no-math-random.test.ts` fails if that rule is removed or narrowed.
 - **Testing time.** `tests/helpers/fake-clock.ts` provides a `FakeClock` that tests install
@@ -359,7 +393,8 @@ empty list means acceptable.
   `error.details.violations` listing the codes above. The message is one generic text for every
   violation and never contains profile data; the client turns the codes into specific wording.
 
-The settings come from `readSecuritySettings(db)`. Editing them is Task 4.5.
+The settings come from `readSecuritySettings(db)`. Editing them is described under
+[Security settings](#security-settings).
 
 ## Changing passwords
 
@@ -390,7 +425,8 @@ PASSWORD_CHANGE_ALREADY_COMPLETED` and nothing is written. Two simultaneous requ
 - **History.** `password_history` holds hashes of earlier _regular_ passwords. `assertNotReused`
   verifies a candidate against the current hash and the five newest entries (`ORDER BY created_at DESC,
 id DESC LIMIT 5`; salts differ, so hashes cannot be compared). On an ordinary change the old hash
-  is added and the history is cut back to five rows in the same transaction. A temporary password
+  is added and the history is cut back to five rows in the same transaction
+  (`rememberPasswordHash`, which the administrator reset uses as well). A temporary password
   is never recorded, and it is refused as a new password because it is the current hash.
 - **Temporary-password deadline.** `changeInitialPassword` checks the 12-hour expiry again (a NULL
   expiry means no deadline); an expired one revokes the session and answers `401
@@ -408,3 +444,57 @@ AUTH_TEMPORARY_PASSWORD_EXPIRED`.
 Both endpoints still need CSRF protection (SD-27, not built yet; see the table above). A wrong
 current password is not yet counted by a rate limiter: the placeholder limiter only knows login
 attempts (Task 6.1, marked `TODO` in `changePassword`).
+
+## Security settings
+
+`app/api/admin/security-settings/route.ts`, Administrator only: `FULLY_AUTHENTICATED` plus one
+permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `401`.
+
+| Endpoint                             | Permission                 | Answer                                 |
+| ------------------------------------ | -------------------------- | -------------------------------------- |
+| `GET /api/admin/security-settings`   | `security-settings:read`   | `200` the four settings                |
+| `PATCH /api/admin/security-settings` | `security-settings:update` | `200` all four settings, as now stored |
+
+| Setting                        | Allowed values                         | Default |
+| ------------------------------ | -------------------------------------- | ------- |
+| `minPasswordLength`            | whole number, 12 to 128                | 12      |
+| `rejectPersonalDataInPassword` | `true` or `false`                      | `false` |
+| `passwordMaxAgeDays`           | whole number, 1 to 3650, or `null`: no | `null`  |
+| `sessionIdleTimeoutMinutes`    | whole number, 1 to 1440                | 15      |
+
+- **PATCH takes any non-empty subset** (`SecuritySettingsPatch`, `server/security/schemas.ts`). An
+  unknown key (including `updatedBy` or `id`), an empty body, a wrong type or an out-of-range value
+  is a `400`, and nothing is written. The `400` is the pipeline's generic `VALIDATION_ERROR`: it
+  names no field, by design. The floor of 12 is held twice: by Zod and by `CHECK
+(min_password_length >= 12)`, so a bug above the service still cannot weaken the password rule.
+- **Nothing is cached.** `getSecuritySettings` is `readSecuritySettings`, the very function the
+  session, login and password services call whenever they enforce a setting, so the value shown is
+  by construction the value in force, and a change is visible to the next request.
+- **One write.** `updateSecuritySettings` is a single upsert in one `BEGIN IMMEDIATE` transaction:
+  only the named columns change, and a database without the row (which reads as the defaults) gets
+  it created. The table stamps `updated_at` on insert and on every update, and `updated_by` is the
+  administrator who made the change. Only the latest change is kept, not a history of changes.
+- **Persisted.** The values are rows in the database file, so a restart of the backend returns what
+  was saved (`settings-service.test.ts` closes a file database and reopens it).
+
+When a change takes effect differs by setting; this is what the tests (SEC-23) pin down.
+
+| Setting                                             | Takes effect                                     | How                                                                                                                                                                                                                                          |
+| --------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionIdleTimeoutMinutes`                         | the next request of every session, open ones too | `resolveSession` reads it on every request. A session already idle for longer than the new limit is revoked at that request, and raising the limit later does not bring it back.                                                             |
+| `passwordMaxAgeDays`                                | the next sign-in                                 | `authStageFor` compares the age of the password with the limit at login: older than the limit (strictly: exactly that many days is still valid) gives a `PASSWORD_EXPIRED` session; `null` turns expiry off. Open sessions keep their stage. |
+| `minPasswordLength`, `rejectPersonalDataInPassword` | the next password change                         | `assertPasswordPolicy` runs when a password is set (the forced first change included). Existing passwords are not re-checked.                                                                                                                |
+
+A limit above 720 minutes for the idle timeout changes nothing in practice: the absolute 12-hour
+session lifetime ends the session first.
+
+- **Screen** (`features/admin-security/security-settings.component.ts`, routed at
+  `/admin/security`): a reactive form with a switch for the personal-data rule, number inputs, and
+  a "Disabled" checkbox for the maximum age (it sends `null` and switches the field off). Each
+  field says when its setting takes effect. The limits are checked in the browser as a
+  convenience, mirroring the server's, and Save sends all four values and then shows what the
+  server stored. The server's `400` carries no field, so it is shown as one message for the whole
+  form, not under a field. Someone who may read the settings but not update them sees the form
+  disabled and no Save button.
+- **Not yet protected: CSRF.** `PATCH` relies on `SameSite=Lax` and on the JSON-only body until
+  SD-27 adds a CSRF check.

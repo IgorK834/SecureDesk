@@ -7,6 +7,7 @@ import { AuthService } from '../../core/auth/auth.service';
 import { AdminApi, type AdminUser } from '../../core/http/admin-api.service';
 import { describeApiError } from '../../core/http/api-error';
 import { ConfirmDialogComponent } from '../../shared/ui/confirm-dialog.component';
+import { TemporaryPasswordDialogComponent } from '../../shared/ui/temporary-password-dialog.component';
 import { Forbidden } from '../forbidden/forbidden';
 import { NotFound } from '../not-found/not-found';
 import { actionErrorMessage } from './error-messages';
@@ -23,10 +24,11 @@ type DetailState =
 const PROTECTED_NOTE = 'The permanent ADMIN account is protected: it cannot be blocked or deleted.';
 
 /**
- * One account: its details, an edit form, and the block, unblock and delete actions. Whether a
- * button is shown follows the permissions the session reports, which is a convenience: the
- * server decides every call, and a refusal (403, 404, 409) is shown as the message it is.
- * Blocking, unblocking and deleting each ask for confirmation and say what will happen.
+ * One account: its details, an edit form, and the block, unblock, reset-password and delete
+ * actions. Whether a button is shown follows the permissions the session reports, which is a
+ * convenience: the server decides every call, and a refusal (403, 404, 409) is shown as the
+ * message it is. Each action asks for confirmation and says what will happen. A reset then shows
+ * the new temporary password once, in a dialog, and keeps it nowhere else.
  */
 @Component({
   selector: 'app-user-detail',
@@ -36,6 +38,7 @@ const PROTECTED_NOTE = 'The permanent ADMIN account is protected: it cannot be b
     UserStatusBadgeComponent,
     UserFormComponent,
     ConfirmDialogComponent,
+    TemporaryPasswordDialogComponent,
     Forbidden,
     NotFound,
   ],
@@ -104,6 +107,11 @@ const PROTECTED_NOTE = 'The permanent ADMIN account is protected: it cannot be b
             @if (auth.has('users:update')) {
               <button type="button" [disabled]="busy()" (click)="startEditing()">Edit</button>
             }
+            @if (auth.has('users:reset-password')) {
+              <button type="button" [disabled]="busy()" (click)="resetPassword(user)">
+                Reset password
+              </button>
+            }
             @if (auth.has('users:block')) {
               @if (user.isBlocked) {
                 <button type="button" [disabled]="busy()" (click)="toggleBlock(user)">
@@ -140,6 +148,7 @@ const PROTECTED_NOTE = 'The permanent ADMIN account is protected: it cannot be b
     }
 
     <app-confirm-dialog />
+    <app-temporary-password-dialog />
   `,
   styles: `
     dt {
@@ -163,6 +172,8 @@ export class UserDetailComponent {
   private readonly router = inject(Router);
   // Static: the dialog is always in the template, never inside a conditional block.
   @ViewChild(ConfirmDialogComponent, { static: true }) private confirm!: ConfirmDialogComponent;
+  @ViewChild(TemporaryPasswordDialogComponent, { static: true })
+  private passwordDialog!: TemporaryPasswordDialogComponent;
   protected readonly auth = inject(AuthService);
 
   protected readonly roleLabels = ROLE_LABELS;
@@ -242,6 +253,42 @@ export class UserDetailComponent {
         this.notice.set('Account blocked. Its sessions were ended.');
       });
     }
+  }
+
+  protected async resetPassword(user: AdminUser): Promise<void> {
+    const message = [
+      `${user.login} will be signed out of every session at once and their current password will stop working. They get a temporary password, valid for 12 hours, that they must replace at their next sign-in.`,
+      user.isBlocked && 'The account stays blocked until you unblock it.',
+      isProtectedAccount(user) &&
+        'This is the permanent ADMIN account: no other account can reset it, so keep the new password safe.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const confirmed = await this.confirm.open({
+      title: 'Reset this password?',
+      message,
+      confirmLabel: 'Reset password',
+    });
+    if (!confirmed) return;
+
+    this.act(this.api.resetPassword(user.id), ({ temporaryPassword }) => {
+      this.state.set({
+        kind: 'ready',
+        user: {
+          ...user,
+          mustChangePassword: true,
+          temporaryPasswordExpiresAt: temporaryPassword.expiresAt,
+        },
+      });
+      this.notice.set('Password reset. Its sessions were ended.');
+      // The only time the password exists: it goes to the dialog and nowhere else.
+      void this.passwordDialog.open({
+        login: user.login,
+        password: temporaryPassword.value,
+        expiresAt: temporaryPassword.expiresAt,
+        reason: 'reset',
+      });
+    });
   }
 
   protected async remove(user: AdminUser): Promise<void> {

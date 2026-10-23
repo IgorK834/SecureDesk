@@ -45,6 +45,12 @@ export interface SessionUser {
   role: Role;
 }
 
+/** The part of the security settings that the password screens show as hints. */
+export interface PasswordPolicy {
+  minPasswordLength: number;
+  rejectPersonalDataInPassword: boolean;
+}
+
 /** Body of `GET /api/auth/me`. */
 export interface MeResponse {
   user: SessionUser;
@@ -52,4 +58,6 @@ export interface MeResponse {
   mustChangePassword: boolean;
   /** Plain strings: a code this client does not know simply never matches. */
   permissions: string[];
+  /** Also sent while a password change is still owed, when no other endpoint can be read. */
+  passwordPolicy: PasswordPolicy;
 }

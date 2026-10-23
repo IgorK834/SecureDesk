@@ -154,9 +154,16 @@ describe('the Drizzle schema in code matches the migrations', () => {
   });
 });
 
+// What a column or table that holds a secret tends to be called. Broad on purpose: a false alarm
+// costs one line in the lists below, a missed secret is a plaintext credential in the database.
+// `pass(?!ed)` covers password, passwd and passphrase without matching "passed".
+const CREDENTIAL_NAME =
+  /pass(?!ed)|pwd|(^|_)pin(_|$)|(^|_)key(_|$)|(^|_)otp(_|$)|secret|token|plain|hash|digest|salt|pepper|credential|cipher|crypt|hmac|totp|mfa|recovery/i;
+
 describe('no plaintext credentials can be stored', () => {
   // Any column whose name suggests it holds a secret must be listed here on purpose. Adding a
-  // `password`, `token`, `plaintext` or similar column fails this test until a reviewer decides.
+  // `password`, `token`, `api_key`, `pin` or similar column fails this test until a reviewer
+  // decides.
   const CREDENTIAL_COLUMNS = [
     'users.password_hash',
     'password_history.password_hash',
@@ -174,13 +181,65 @@ describe('no plaintext credentials can be stored', () => {
   it('limits credential-like columns to password_hash and token_hash plus non-secret metadata', () => {
     const credentialLike = tableNames().flatMap((table) =>
       columnsOf(table)
-        .filter((column) => /password|token|secret|plain|hash|salt|pepper/i.test(column))
+        .filter((column) => CREDENTIAL_NAME.test(column))
         .map((column) => `${table}.${column}`),
     );
 
     expect([...credentialLike].sort()).toEqual(
       [...CREDENTIAL_COLUMNS, ...NON_SECRET_METADATA].sort(),
     );
+  });
+
+  it('has no table that looks like it keeps credentials, other than the password history', () => {
+    expect(tableNames().filter((table) => CREDENTIAL_NAME.test(table))).toEqual([
+      'password_history',
+    ]);
+  });
+
+  // Guards the guard: a pattern that matched nothing new would let the tests above pass forever.
+  it.each([
+    'password',
+    'passwd',
+    'pwd',
+    'passphrase',
+    'token_hash',
+    'user_pin',
+    'api_key',
+    'private_key',
+    'key',
+    'credential',
+    'otp_code',
+    'totp_seed',
+    'recovery_code',
+    'digest',
+    'hmac_value',
+    'cipher_text',
+    'mfa_secret',
+  ])('treats a column called %s as credential-like', (name) => {
+    expect(CREDENTIAL_NAME.test(name)).toBe(true);
+  });
+
+  it.each([
+    'id',
+    'login',
+    'first_name',
+    'created_at',
+    'auth_stage',
+    'role_id',
+    'status',
+    'title',
+    'description',
+    'assigned_to_user_id',
+    'expires_at',
+    'updated_by',
+    'is_blocked',
+    'deleted_at',
+    'code',
+    'name',
+    'last_activity_at',
+    'login_normalized',
+  ])('does not treat a column called %s as credential-like', (name) => {
+    expect(CREDENTIAL_NAME.test(name)).toBe(false);
   });
 
   it('stores every credential as text in a `*_hash` column', () => {
