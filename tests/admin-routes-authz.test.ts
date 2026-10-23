@@ -1,11 +1,8 @@
 import path from 'node:path';
-import { NextResponse } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedWorld, signInAs } from '../apps/backend/src/server/db/__fixtures__/seeded-world';
 import { setUpSharedTestDb } from '../apps/backend/src/server/db/__fixtures__/shared-test-db';
 import { db } from '../apps/backend/src/server/db/client';
-import { defineRoute } from '../apps/backend/src/server/http/route-handler';
-import { PERMISSIONS } from '../apps/backend/src/server/permissions/codes';
 import { type RouteModule, createApiClient } from './helpers/api-client';
 import { loadRoutes } from './helpers/route-scanner';
 
@@ -13,16 +10,14 @@ import { loadRoutes } from './helpers/route-scanner';
 // every other role gets 403 with nothing from the resource in the body. This runs the whole
 // pipeline through the real route handlers, for every /api/admin/** route found on disk.
 //
-// No real /api/admin route exists until the user-management task (SD-16). Until then the
-// matrix is proven on a test-only route configured exactly as that endpoint will be
-// (FULLY_AUTHENTICATED + users:read). When real routes appear they join the matrix on their
-// own, and the stand-in can be deleted.
+// Every /api/admin/** route found on disk joins the matrix on its own, so a new admin endpoint is
+// covered the moment it is written. The list of routes it must find is checked below, so the
+// matrix cannot quietly shrink to nothing if the scan ever stops seeing them.
 
 const API_ROOT = path.resolve(__dirname, '../apps/backend/src/app/api');
 
 const NOT_SIGNED_IN = '{"error":{"code":"AUTH_REQUIRED","message":"Wymagane zalogowanie"}}';
 const FORBIDDEN = '{"error":{"code":"AUTH_FORBIDDEN","message":"Brak uprawnień"}}';
-const SECRET = 'secret-user-data';
 
 setUpSharedTestDb();
 let ids: Record<string, string>;
@@ -31,41 +26,23 @@ beforeEach(() => {
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
 });
 
-const standInHandler = vi.fn(() => NextResponse.json({ users: [SECRET] }));
-const standIn = defineRoute({
-  name: 'test.admin_users_stand_in',
-  auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_READ },
-  handler: standInHandler,
-});
-
 interface Target {
   label: string;
   route: string;
   method: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
   module: RouteModule;
-  isStandIn: boolean;
 }
 
 const realAdminRoutes = (await loadRoutes(API_ROOT)).filter(
   ({ route }) => route === '/api/admin' || route.startsWith('/api/admin/'),
 );
 
-const targets: Target[] = [
-  {
-    label: 'GET /api/admin/users (test-only stand-in)',
-    route: '/api/admin/users',
-    method: 'GET',
-    module: { GET: standIn },
-    isStandIn: true,
-  },
-  ...realAdminRoutes.map(({ route, method, handler }) => ({
-    label: `${method} ${route}`,
-    route,
-    method,
-    module: { [method]: handler } as RouteModule,
-    isStandIn: false,
-  })),
-];
+const targets: Target[] = realAdminRoutes.map(({ route, method, handler }) => ({
+  label: `${method} ${route}`,
+  route,
+  method,
+  module: { [method]: handler } as RouteModule,
+}));
 
 /** `/api/admin/users/[id]` becomes a callable path plus the `params` Next would pass. */
 function callable(route: string) {
@@ -83,7 +60,7 @@ const REFUSED = [
   { who: 'a Guest', login: 'guest1' },
 ] as const;
 
-describe.each(targets)('$label', ({ route, method, module, isStandIn }) => {
+describe.each(targets)('$label', ({ route, method, module }) => {
   const { url, params } = callable(route);
   // A body-carrying call is sent with valid JSON, so a refusal can only come from authorization.
   const options = {
@@ -96,7 +73,6 @@ describe.each(targets)('$label', ({ route, method, module, isStandIn }) => {
 
     expect(response.status).toBe(401);
     expect(await response.text()).toBe(NOT_SIGNED_IN);
-    if (isStandIn) expect(standInHandler).not.toHaveBeenCalled();
   });
 
   it.each(REFUSED)('answers $who with 403 and no resource data', async ({ login }) => {
@@ -107,8 +83,6 @@ describe.each(targets)('$label', ({ route, method, module, isStandIn }) => {
 
     expect(response.status).toBe(403);
     expect(body).toBe(FORBIDDEN); // exactly the envelope: no extra fields, no resource data
-    expect(body).not.toContain(SECRET);
-    if (isStandIn) expect(standInHandler).not.toHaveBeenCalled();
   });
 
   it('lets the Administrator through the guard', async () => {
@@ -119,9 +93,21 @@ describe.each(targets)('$label', ({ route, method, module, isStandIn }) => {
     // A real route may still answer 400 or 404 to an empty probe; what must not happen is a
     // refusal of the one role that owns administration.
     expect([401, 403]).not.toContain(response.status);
-    if (isStandIn) {
-      expect(response.status).toBe(200);
-      expect(await response.text()).toContain(SECRET);
-    }
+  });
+});
+
+describe('the admin routes the matrix covers', () => {
+  it('are all of the user-management endpoints, so the matrix above cannot be empty by accident', () => {
+    expect(targets.map(({ label }) => label).sort()).toEqual(
+      [
+        'GET /api/admin/users',
+        'POST /api/admin/users',
+        'GET /api/admin/users/[id]',
+        'PATCH /api/admin/users/[id]',
+        'DELETE /api/admin/users/[id]',
+        'POST /api/admin/users/[id]/block',
+        'POST /api/admin/users/[id]/unblock',
+      ].sort(),
+    );
   });
 });
