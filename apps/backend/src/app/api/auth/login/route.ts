@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { readSessionToken, sessionCookie } from '../../../../server/auth/cookie';
 import { authenticate } from '../../../../server/auth/login-service';
 import { db } from '../../../../server/db/client';
-import { errorResponse, handleRoute } from '../../../../server/http/route';
+import { errorResponse } from '../../../../server/http/errors';
+import { defineRoute } from '../../../../server/http/route-handler';
 import { logEvent } from '../../../../server/security/log-event';
 
 export const runtime = 'nodejs';
@@ -26,51 +27,47 @@ function clientKeyOf(request: NextRequest): string {
   return 'unknown';
 }
 
-export const POST = handleRoute('auth.login', async (request, requestId) => {
-  // Only application/json is read. A cross-site HTML form can send text/plain without a CORS
-  // preflight, so accepting it would allow login CSRF (signing a victim into the attacker's
-  // account). Anything else, or a body that is not valid JSON, is validated as `undefined`,
-  // which the schema rejects.
-  const mediaType = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
-  const body: unknown =
-    mediaType === 'application/json' ? await request.json().catch(() => undefined) : undefined;
-  const parsed = LoginBody.safeParse(body);
-  if (!parsed.success) {
-    logEvent('auth.login.invalid_request', requestId);
-    return errorResponse(400, 'VALIDATION_ERROR', 'Nieprawidłowe dane żądania');
-  }
+// Public by necessity (there is no session yet) and on the conformance test's allowlist. The body
+// is JSON-only: the wrapper refuses any other Content-Type, because a cross-site HTML form can
+// send text/plain without a CORS preflight, so accepting it would allow login CSRF (signing a
+// victim into the attacker's account).
+export const POST = defineRoute({
+  name: 'auth.login',
+  auth: 'public',
+  body: LoginBody,
+  handler: async ({ request, requestId, body }) => {
+    const result = await authenticate(body, {
+      db,
+      clientKey: clientKeyOf(request),
+      presentedSessionToken: readSessionToken(request),
+    });
 
-  const result = await authenticate(parsed.data, {
-    db,
-    clientKey: clientKeyOf(request),
-    presentedSessionToken: readSessionToken(request),
-  });
-
-  switch (result.outcome) {
-    case 'authenticated': {
-      logEvent('auth.login.success', requestId);
-      const response = NextResponse.json(
-        {
-          user: result.user,
-          authStage: result.authStage,
-          mustChangePassword: result.mustChangePassword,
-        },
-        { headers: { 'Cache-Control': 'no-store' } },
-      );
-      response.cookies.set(sessionCookie(result.session.token, result.session.expiresAt));
-      return response;
+    switch (result.outcome) {
+      case 'authenticated': {
+        logEvent('auth.login.success', requestId);
+        const response = NextResponse.json(
+          {
+            user: result.user,
+            authStage: result.authStage,
+            mustChangePassword: result.mustChangePassword,
+          },
+          { headers: { 'Cache-Control': 'no-store' } },
+        );
+        response.cookies.set(sessionCookie(result.session.token, result.session.expiresAt));
+        return response;
+      }
+      case 'rate_limited':
+        logEvent('auth.login.rate_limited', requestId);
+        return errorResponse(
+          429,
+          'AUTH_RATE_LIMITED',
+          'Zbyt wiele prób logowania. Spróbuj ponownie później',
+          { 'Retry-After': String(result.retryAfterSeconds) },
+        );
+      case 'invalid_credentials':
+        logEvent('auth.login.failure', requestId);
+        // The same status, code and text for every reason, so the body is byte-identical.
+        return errorResponse(401, 'AUTH_INVALID_CREDENTIALS', 'Login lub hasło niepoprawne');
     }
-    case 'rate_limited':
-      logEvent('auth.login.rate_limited', requestId);
-      return errorResponse(
-        429,
-        'AUTH_RATE_LIMITED',
-        'Zbyt wiele prób logowania. Spróbuj ponownie później',
-        { 'Retry-After': String(result.retryAfterSeconds) },
-      );
-    case 'invalid_credentials':
-      logEvent('auth.login.failure', requestId);
-      // The same status, code and text for every reason, so the body is byte-identical.
-      return errorResponse(401, 'AUTH_INVALID_CREDENTIALS', 'Login lub hasło niepoprawne');
-  }
+  },
 });

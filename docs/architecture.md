@@ -102,6 +102,7 @@ no `password_changed_at`, it counts as expired.
 | 200    | (none)                     | Valid credentials; sets the session cookie                         |
 | 400    | `VALIDATION_ERROR`         | Not JSON, wrong type, missing/extra/oversized field                |
 | 401    | `AUTH_INVALID_CREDENTIALS` | Every credential failure; byte-identical body and headers          |
+| 413    | `PAYLOAD_TOO_LARGE`        | The body is over 64 KiB                                            |
 | 429    | `AUTH_RATE_LIMITED`        | The rate-limit hook refused the attempt (`Retry-After` is sent)    |
 | 500    | `INTERNAL_ERROR`           | Anything unexpected; nothing about the cause is returned or logged |
 
@@ -115,12 +116,9 @@ These exist so login works end to end and are to be replaced or confirmed by lat
 
 | Part                | Current stand-in                                                    | Owner    |
 | ------------------- | ------------------------------------------------------------------- | -------- |
-| Route wrapper       | `server/http/route.ts` (`handleRoute`, `ApiError`, `errorResponse`) | Task 3.2 |
 | Rate limiter        | `loginRateLimiter` allows everything                                | Task 6.1 |
 | Rate-limiter client | first `X-Forwarded-For` entry if `TRUST_PROXY=true`, else `unknown` | Task 6.1 |
-| Request body limit  | none yet: the body is read in full before validation                | SD-27    |
-| CSRF protection     | none yet; logout and both password changes rely on SameSite=Lax     | SD-27    |
-| JSON body reading   | `server/http/json-body.ts`; the login route has its own copy        | Task 3.2 |
+| CSRF protection     | none yet (a slot in `defineRoute`); relies on SameSite=Lax          | SD-27    |
 
 ## Sessions
 
@@ -168,18 +166,54 @@ holding any required permission. A refused request never extends a session, so a
 cannot be kept alive by hammering an endpoint it may not use. Every admitted request counts,
 including `GET /api/auth/me`: the Angular app calls it once at start-up and must not poll it.
 
-### Guards
+### Route wrapper
 
-A route calls a guard, wrapped in `handleRoute` (`server/http/route.ts`), which turns the thrown
-`ApiError` into the response. The guard returns the session, the user and the role's permissions.
+Every API route is built with `defineRoute` (`server/http/route-handler.ts`), which does the
+checks in one place so a handler cannot forget one. `auth` is required: a route that does not say who
+may call it does not compile, and a route open to everyone must say `auth: 'public'`.
 
-| Guard                                | Admits                                                           |
-| ------------------------------------ | ---------------------------------------------------------------- |
-| `requireSession(request)`            | any signed-in session, including one that owes a password change |
-| `requireFullSession(request)`        | `FULLY_AUTHENTICATED` only: the default for business endpoints   |
-| `requireStage(request, [stages...])` | exactly the listed stages (for the password-change endpoints)    |
+```ts
+export const GET = defineRoute({
+  name: 'users.list', // the event prefix in logs
+  auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_READ },
+  query: ListUsersQuery, // optional; `body` and `params` work the same way
+  handler: ({ session, query }) => NextResponse.json(/* ... */),
+});
+```
 
-Each takes an optional `{ permission }`. Refusals:
+A request stops at the first step that refuses it:
+
+| #   | Step             | Refusal                                                                                         |
+| --- | ---------------- | ----------------------------------------------------------------------------------------------- |
+| 1   | Headers          | `413` if the declared `Content-Length` is over 64 KiB; `400` if a route with a body is not JSON |
+| 2   | Session          | `401 AUTH_REQUIRED`                                                                             |
+| 3   | Stage            | `403 AUTH_PASSWORD_CHANGE_REQUIRED` or `AUTH_FORBIDDEN`                                         |
+| 4   | Permission       | `403 AUTH_FORBIDDEN`                                                                            |
+| 5   | CSRF check       | reserved for Task 6.1, so a refused request cannot extend a session                             |
+| 6   | Session activity | none: the idle timer restarts only now, for an admitted request                                 |
+| 7   | Validation       | `400 VALIDATION_ERROR` for params, query and body (strict Zod schemas)                          |
+| 8   | Handler          | whatever it returns, or throws                                                                  |
+| 9   | Error mapping    | an `ApiError` becomes its envelope; anything else becomes a generic `500`                       |
+
+- **Cheap checks first.** The headers are looked at before the database, so an oversized or
+  mistyped request costs nothing. The body is read only after authorization, and in chunks: a
+  request without a `Content-Length` (chunked upload) is cut off at 64 KiB as well.
+- **Permissions are read on every request** (`resolveSession` joins `role_permissions`), so
+  removing one from a role applies to the next request, without a new login. A code that is not in
+  `PERMISSIONS` is never granted, even if a database row says so. A list of codes means _any of_.
+- **Errors** share one envelope, `{ "error": { "code", "message" } }`, never cached, built in
+  `server/http/errors.ts`: `UnauthorizedError` 401, `ForbiddenError` and
+  `PasswordChangeRequiredError` 403, `ValidationError` 400, `NotFoundError` 404, `ConflictError` 409.
+  An unexpected error (a SQL failure included) is logged as an event name and a request id only,
+  and answered with `500 INTERNAL_ERROR`: no stack, query or path leaves the server.
+- **A guardrail, not a convention.** `tests/route-guard-conformance.test.ts` imports every
+  `app/api/**/route.ts` and fails when an exported method was not built with `defineRoute`, when an
+  `/api/admin/**` route names no permission, or when a route is `public` but is not on the allowlist
+  (`/api/health`, `/api/auth/login`). `tests/admin-routes-authz.test.ts` then proves 401 for an
+  anonymous caller and 403 for a Manager, Employee and Guest on every `/api/admin/**` route.
+
+The wrapper calls `requireStage` (`server/auth/guards.ts`), which returns the session, the user and
+the role's permissions. Its refusals:
 
 | Status | `error.code`                    | When                                                                               |
 | ------ | ------------------------------- | ---------------------------------------------------------------------------------- |
@@ -281,10 +315,10 @@ Success is `200 { user, authStage: "FULLY_AUTHENTICATED" }` with a **new** sessi
 
 **The restriction is in the session, not in Angular routing.** A session in `INITIAL_PASSWORD_CHANGE`
 or `PASSWORD_EXPIRED` is refused by every endpoint whose guard does not list its stage, with `403
-AUTH_PASSWORD_CHANGE_REQUIRED`. Business endpoints use `requireFullSession`; only `GET
+AUTH_PASSWORD_CHANGE_REQUIRED`. Business endpoints list only `FULLY_AUTHENTICATED`; only `GET
 /api/auth/me`, `POST /api/auth/logout`, the endpoint of that stage (and, for an expired password,
-`change-password`) admit a restricted session. Until Task 3.2 introduces `defineRoute`, this rests
-on each route calling the right guard.
+`change-password`) admit a restricted session. Because `defineRoute` makes the `auth.stages` list
+mandatory, a route cannot skip this check by accident.
 
 - **One transaction, `BEGIN IMMEDIATE`.** The new hash (made before the transaction, because hashing
   is asynchronous and a transaction is synchronous), the history update, the revocation of all of the

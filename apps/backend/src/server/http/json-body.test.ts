@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { parseJsonBody } from './json-body';
-import { ApiError } from './route';
+import { ApiError } from './errors';
 
 const Schema = z.object({ name: z.string() }).strict();
 
@@ -60,5 +60,19 @@ describe('parseJsonBody', () => {
       'Nieprawidłowe dane żądania',
       undefined,
     ]);
+  });
+
+  // `body: ''` still gives a stream (that is the "empty body" case above). A client can also
+  // send the JSON content type with no body at all, and then `request.body` is null.
+  it('refuses a request that has no body at all', async () => {
+    const request = new NextRequest('http://localhost:3000/api/anything', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(request.body).toBeNull(); // otherwise this would not exercise the no-body path
+
+    const error = await refusal(request);
+
+    expect([error.status, error.code]).toStrictEqual([400, 'VALIDATION_ERROR']);
   });
 });

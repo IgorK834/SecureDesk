@@ -15,6 +15,13 @@
       "when": 1792689557099,
       "tag": "0001_protect_admin_account",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792759371217,
+      "tag": "0002_add_tickets",
+      "breakpoints": true
     }
   ]
 }

@@ -19,7 +19,9 @@ async function main(): Promise<void> {
     const file = path.resolve(INITIAL_CREDENTIALS_FILE);
     if (persist) prepareCredentialsDir(file);
 
-    const { created, skipped } = await seedDatabase(db);
+    // Demo tickets are for development and test databases only.
+    const demoTickets = process.env.NODE_ENV !== 'production';
+    const { created, skipped, ticketsCreated } = await seedDatabase(db, { demoTickets });
     db.$client.close();
 
     if (created.length === 0) {
@@ -36,6 +38,7 @@ async function main(): Promise<void> {
       );
       console.log('Passwords are not persisted in test mode; seedDatabase() returns them.');
     }
+    if (ticketsCreated > 0) console.log(`db:seed OK - created ${ticketsCreated} demo ticket(s).`);
   } catch (error) {
     console.error(`db:seed failed: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;

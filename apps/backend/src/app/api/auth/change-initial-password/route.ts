@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { sessionCookie } from '../../../../server/auth/cookie';
-import { requireStage } from '../../../../server/auth/guards';
 import { changeInitialPassword } from '../../../../server/auth/password-service';
 import { db } from '../../../../server/db/client';
-import { parseJsonBody } from '../../../../server/http/json-body';
-import { handleRoute } from '../../../../server/http/route';
+import { defineRoute } from '../../../../server/http/route-handler';
 import { logEvent } from '../../../../server/security/log-event';
 
 export const runtime = 'nodejs';
@@ -24,25 +22,28 @@ const ChangeInitialPasswordBody = z
 /**
  * Replaces an administrator-issued password. Open only to the `INITIAL_PASSWORD_CHANGE` stage,
  * so the restriction lives in the session, not in the Angular routing: every other endpoint
- * refuses that stage with 403 `AUTH_PASSWORD_CHANGE_REQUIRED` unless its guard allows it (only
- * `GET /api/auth/me`, this endpoint and `POST /api/auth/logout` do). On success every session
- * of the user is revoked and a new fully authenticated one is returned in the cookie.
+ * refuses that stage with 403 `AUTH_PASSWORD_CHANGE_REQUIRED` unless its `auth.stages` lists it
+ * (only `GET /api/auth/me`, this endpoint and `POST /api/auth/logout` do). It needs no
+ * permission: the stage is the authorization. On success every session of the user is revoked
+ * and a new fully authenticated one is returned in the cookie.
  *
  * NOTE: a state-changing request normally also needs CSRF protection. That mechanism is owned
  * by SD-27 and does not exist yet; SameSite=Lax on the cookie and the JSON-only body are the
  * only defenses until then.
  */
-export const POST = handleRoute('auth.change_initial_password', async (request, requestId) => {
-  const { session } = requireStage(request, ['INITIAL_PASSWORD_CHANGE']);
-  const input = await parseJsonBody(request, ChangeInitialPasswordBody);
+export const POST = defineRoute({
+  name: 'auth.change_initial_password',
+  auth: { stages: ['INITIAL_PASSWORD_CHANGE'] },
+  body: ChangeInitialPasswordBody,
+  handler: async ({ requestId, session, body }) => {
+    const result = await changeInitialPassword(db, session.session, body);
 
-  const result = await changeInitialPassword(db, session, input);
-
-  logEvent('auth.change_initial_password.success', requestId);
-  const response = NextResponse.json(
-    { user: result.user, authStage: result.authStage },
-    { headers: { 'Cache-Control': 'no-store' } },
-  );
-  response.cookies.set(sessionCookie(result.session.token, result.session.expiresAt));
-  return response;
+    logEvent('auth.change_initial_password.success', requestId);
+    const response = NextResponse.json(
+      { user: result.user, authStage: result.authStage },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
+    response.cookies.set(sessionCookie(result.session.token, result.session.expiresAt));
+    return response;
+  },
 });
