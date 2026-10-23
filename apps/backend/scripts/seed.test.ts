@@ -1,5 +1,14 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -169,6 +178,22 @@ describe('db:seed', () => {
 
     expect(status).toBe(1);
     expect(query('SELECT 1 FROM users')).toHaveLength(0);
+  });
+
+  it('aborts before creating any account when the credentials file exists but is read-only', () => {
+    run('migrate', { DATABASE_PATH: dbFile });
+    mkdirSync(path.dirname(credentialsFile), { recursive: true, mode: 0o700 });
+    writeFileSync(credentialsFile, '# kept\n', { mode: 0o400 });
+    chmodSync(credentialsFile, 0o400);
+
+    const { status, out } = run('seed', { DATABASE_PATH: dbFile });
+
+    expect(status).toBe(1);
+    expect(out).toMatch(/db:seed failed: .*EACCES/);
+    // Otherwise the accounts would be committed with their passwords saved nowhere, and the next
+    // run would report "nothing to create": ADMIN could only be recovered by wiping the database.
+    expect(query('SELECT 1 FROM users')).toHaveLength(0);
+    expect(readFileSync(credentialsFile, 'utf8')).toBe('# kept\n');
   });
 });
 

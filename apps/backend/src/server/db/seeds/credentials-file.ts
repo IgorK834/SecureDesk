@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, mkdirSync } from 'node:fs';
+import { accessSync, appendFileSync, chmodSync, constants, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { SeedResult } from '.';
 
@@ -9,11 +9,25 @@ import type { SeedResult } from '.';
 export const INITIAL_CREDENTIALS_FILE = path.join('.local', 'initial-credentials.txt');
 
 /**
- * Creates the private directory. Call it before seeding, so a permission problem aborts the
- * run before any account exists whose password could not be saved.
+ * Makes sure the passwords can be stored, before seeding creates anything: creates the private
+ * directory, and checks that the file (or, while there is none yet, the directory) is writable.
+ * Call it before seeding, so a problem aborts the run while no account exists whose password
+ * could not be saved; otherwise the accounts would be committed with their passwords lost, and
+ * the next run would only report "nothing to create".
+ *
+ * An existing file is also tightened to 0600 here, before any password is appended to it. It
+ * checks writability first, so a file that was made read-only on purpose is reported, not
+ * silently made writable.
  */
-export function prepareCredentialsDir(file: string): void {
-  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+export function prepareCredentialsFile(file: string): void {
+  const dir = path.dirname(file);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (existsSync(file)) {
+    accessSync(file, constants.W_OK);
+    chmodSync(file, 0o600);
+  } else {
+    accessSync(dir, constants.W_OK);
+  }
 }
 
 /**
