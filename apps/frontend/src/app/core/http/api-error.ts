@@ -10,3 +10,13 @@ export function describeApiError(error: unknown): { status: number; code?: strin
   const code = (error.error as { error?: { code?: unknown } } | null)?.error?.code;
   return typeof code === 'string' ? { status: error.status, code } : { status: error.status };
 }
+
+/** Reads only the allowlisted list shape used by password-policy errors, never server prose. */
+export function passwordPolicyViolations(error: unknown): string[] {
+  if (!(error instanceof HttpErrorResponse)) return [];
+  const violations = (error.error as { error?: { details?: { violations?: unknown } } } | null)
+    ?.error?.details?.violations;
+  return Array.isArray(violations)
+    ? violations.filter((violation): violation is string => typeof violation === 'string')
+    : [];
+}
