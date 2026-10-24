@@ -61,3 +61,16 @@ export interface MeResponse {
   /** Also sent while a password change is still owed, when no other endpoint can be read. */
   passwordPolicy: PasswordPolicy;
 }
+
+/** Safe session data returned after credentials have been accepted. */
+export interface LoginResponse {
+  user: SessionUser;
+  authStage: AuthStage;
+  mustChangePassword: boolean;
+}
+
+/** A successful password change always creates a fresh, fully authenticated session. */
+export interface PasswordChangeResponse {
+  user: SessionUser;
+  authStage: 'FULLY_AUTHENTICATED';
+}

@@ -2,9 +2,13 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ApiClient } from '../http/api-client.service';
-import type { AuthStage, MeResponse, Permission, SessionUser } from './auth.models';
+import type { AuthStage, MeResponse, PasswordPolicy, Permission, SessionUser } from './auth.models';
 
-type Session = Pick<MeResponse, 'user' | 'authStage' | 'permissions'>;
+type Session = Pick<MeResponse, 'user' | 'authStage' | 'permissions'> & {
+  passwordPolicy: PasswordPolicy | null;
+};
+type SessionUpdate = Pick<MeResponse, 'user' | 'authStage'> &
+  Partial<Pick<MeResponse, 'permissions' | 'passwordPolicy'>>;
 
 /**
  * The signed-in user as the SERVER sees them. The state lives only in memory and is rebuilt from
@@ -18,10 +22,15 @@ export class AuthService {
   // One signal for the whole session, so user, stage and permissions can never be out of step.
   private readonly session = signal<Session | null>(null);
   private readonly settled = signal(false);
+  /** Invalidates an older `/me` answer after login, logout or a session-expiry clear. */
+  private revision = 0;
 
   readonly user = computed<SessionUser | null>(() => this.session()?.user ?? null);
   readonly authStage = computed<AuthStage | null>(() => this.session()?.authStage ?? null);
   readonly permissions = computed<readonly string[]>(() => this.session()?.permissions ?? []);
+  readonly passwordPolicy = computed<PasswordPolicy | null>(
+    () => this.session()?.passwordPolicy ?? null,
+  );
   /** True once the first `load()` has finished, whatever its outcome. */
   readonly loaded = this.settled.asReadonly();
 
@@ -31,11 +40,12 @@ export class AuthService {
    * them to /login.
    */
   async load(): Promise<void> {
+    const revision = this.revision;
     try {
-      const { user, authStage, permissions } = await firstValueFrom(this.api.me());
-      this.session.set({ user, authStage, permissions });
+      const response = await firstValueFrom(this.api.me());
+      if (revision === this.revision) this.replaceSession(response);
     } catch (error) {
-      this.session.set(null);
+      if (revision === this.revision) this.session.set(null);
       // 401 only means that nobody is signed in. Anything else (server down, bad response)
       // still ends up as "signed out", but must not pass silently.
       if (!(error instanceof HttpErrorResponse && error.status === 401)) {
@@ -44,6 +54,26 @@ export class AuthService {
     } finally {
       this.settled.set(true);
     }
+  }
+
+  /**
+   * Mirrors a successful auth response in memory. Login responses do not include permissions or
+   * policy, while `/me` does; a password rotation preserves those values only for the same user.
+   */
+  setSession(update: SessionUpdate): void {
+    this.revision += 1;
+    this.replaceSession(update);
+  }
+
+  private replaceSession(update: SessionUpdate): void {
+    const current = this.session();
+    const sameUser = current?.user.id === update.user.id;
+    this.session.set({
+      user: update.user,
+      authStage: update.authStage,
+      permissions: update.permissions ?? (sameUser ? current.permissions : []),
+      passwordPolicy: update.passwordPolicy ?? (sameUser ? current.passwordPolicy : null),
+    });
   }
 
   /**
@@ -60,6 +90,7 @@ export class AuthService {
 
   /** Forgets the session in this tab. It does not end the session on the server. */
   clear(): void {
+    this.revision += 1;
     this.session.set(null);
   }
 }
