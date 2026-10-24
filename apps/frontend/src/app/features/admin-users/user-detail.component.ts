@@ -97,10 +97,10 @@ const PROTECTED_NOTE = 'The permanent ADMIN account is protected: it cannot be b
           </dl>
 
           @if (notice(); as text) {
-            <p role="status">{{ text }}</p>
+            <p role="status" aria-live="polite">{{ text }}</p>
           }
           @if (actionError(); as text) {
-            <p role="alert" class="error">{{ text }}</p>
+            <p role="alert" aria-live="assertive" class="error">{{ text }}</p>
           }
 
           <div class="actions">
