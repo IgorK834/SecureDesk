@@ -2,14 +2,13 @@ import type { Route, Routes } from '@angular/router';
 import { READ_TICKETS } from './core/auth/auth.models';
 import { authGuard } from './core/guards/auth.guard';
 import { guestOnlyGuard } from './core/guards/guest-only.guard';
+import { initialChangeGuard } from './core/guards/initial-change.guard';
 import { type PermissionRouteData, permissionGuard } from './core/guards/permission.guard';
 
 // The page inventory of backlog section 11.1. Every route except /login sits behind `authGuard`
 // (so a session that owes a password change is sent to that page from everywhere, including
 // unknown URLs); pages for a role also declare the permission it needs. All of this is UX: the
 // backend authorizes every API call itself (see `core/guards/auth.guard.ts`).
-
-const placeholder = () => import('./features/placeholder/placeholder').then((m) => m.Placeholder);
 
 /** Signed in and holding the permission (any one of a list). */
 const requires = (
@@ -25,13 +24,16 @@ export const routes: Routes = [
     path: 'login',
     title: 'Sign in',
     canActivate: [guestOnlyGuard],
-    loadComponent: placeholder,
+    loadComponent: () => import('./features/login/login.component').then((m) => m.LoginComponent),
   },
   {
     path: 'change-initial-password',
     title: 'Set your password',
-    canActivate: [authGuard],
-    loadComponent: placeholder,
+    canActivate: [authGuard, initialChangeGuard],
+    loadComponent: () =>
+      import('./features/password/change-initial-password.component').then(
+        (m) => m.ChangeInitialPasswordComponent,
+      ),
   },
   {
     path: 'dashboard',
@@ -43,7 +45,10 @@ export const routes: Routes = [
     path: 'account/change-password',
     title: 'Change password',
     canActivate: [authGuard],
-    loadComponent: placeholder,
+    loadComponent: () =>
+      import('./features/password/change-password.component').then(
+        (m) => m.ChangePasswordComponent,
+      ),
   },
   {
     path: 'admin/users',
@@ -75,18 +80,26 @@ export const routes: Routes = [
         (m) => m.SecuritySettingsComponent,
       ),
   },
-  { path: 'tickets', title: 'Tickets', ...requires(READ_TICKETS), loadComponent: placeholder },
+  {
+    path: 'tickets',
+    title: 'Tickets',
+    ...requires(READ_TICKETS),
+    loadComponent: () =>
+      import('./features/tickets/ticket-list.component').then((m) => m.TicketListComponent),
+  },
   {
     path: 'tickets/new',
     title: 'New ticket',
     ...requires('tickets:create'),
-    loadComponent: placeholder,
+    loadComponent: () =>
+      import('./features/tickets/ticket-new.component').then((m) => m.TicketNewComponent),
   },
   {
     path: 'tickets/:id',
     title: 'Ticket',
     ...requires(READ_TICKETS),
-    loadComponent: placeholder,
+    loadComponent: () =>
+      import('./features/tickets/ticket-detail.component').then((m) => m.TicketDetailComponent),
   },
   {
     path: 'forbidden',

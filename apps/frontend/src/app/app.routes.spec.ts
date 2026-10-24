@@ -74,7 +74,10 @@ describe('reload (session restored from the server cookie)', () => {
     expect(await app.open('/dashboard')).toBe('/dashboard');
 
     expect(app.page()).toContain('Manager dashboard');
-    // The only server call was the start-up `/api/auth/me`; no login request was made.
+    app.http
+      .expectOne('/api/tickets?limit=100&offset=0')
+      .flush({ items: [], limit: 100, offset: 0, total: 0 });
+    // No login request was made; only the dashboard summary followed the start-up `/api/auth/me`.
     app.http.verify();
   });
 
@@ -221,14 +224,14 @@ describe('error pages', () => {
   });
 });
 
-describe('routes owned by later tasks', () => {
-  it('open a titled placeholder rather than a blank page', async () => {
+describe('password route', () => {
+  it('opens the change-password form', async () => {
     const app = await startApp(meResponse('ADMINISTRATOR'));
 
     await app.open('/account/change-password');
 
     expect(app.page()).toContain('Change password');
-    expect(app.page()).toContain('This page is not available yet.');
+    expect(app.page()).toContain('Current password');
   });
 });
 
@@ -289,7 +292,7 @@ describe('the admin user pages, wired to the real HTTP client', () => {
       );
     await app.render();
 
-    expect(app.page()).toContain('not allowed to view users');
+    expect(app.page()).toContain('Access denied');
   });
 
   it('shows the not-found page for an account the server does not have (404)', async () => {
@@ -341,7 +344,9 @@ describe('the admin user pages, wired to the real HTTP client', () => {
       { status: 201, statusText: 'Created' },
     );
     await app.render();
-    expect(root(app).querySelector('dialog')?.textContent).toContain('Tmp-Secret-9xQ4zLm2');
+    expect(root(app).querySelector<HTMLInputElement>('#temporary-password-value')?.value).toBe(
+      'Tmp-Secret-9xQ4zLm2',
+    );
     expect(TestBed.inject(Router).url).toBe('/admin/users/new');
 
     click(app, 'I have saved the password');
@@ -424,7 +429,9 @@ describe('the admin user pages, wired to the real HTTP client', () => {
       temporaryPassword: { value: 'Reset-Secret-4wNq8Tz1', expiresAt: '2030-01-01T12:00:00.000Z' },
     });
     await app.render();
-    expect(root(app).querySelector('output')?.textContent).toBe('Reset-Secret-4wNq8Tz1');
+    expect(root(app).querySelector<HTMLInputElement>('#temporary-password-value')?.value).toBe(
+      'Reset-Secret-4wNq8Tz1',
+    );
     expect(TestBed.inject(Router).url).toBe('/admin/users/u-1');
 
     click(app, 'I have saved the password');
@@ -514,6 +521,6 @@ describe('the security settings page, wired to the real HTTP client', () => {
       );
     await app.render();
 
-    expect(app.page()).toContain('Could not load the settings. You are not allowed to do this.');
+    expect(app.page()).toContain('Access denied');
   });
 });
