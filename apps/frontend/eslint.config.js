@@ -22,6 +22,13 @@ module.exports = defineConfig([
         'error',
         { type: 'element', prefix: 'app', style: 'kebab-case' },
       ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'CallExpression[callee.property.name=/^bypassSecurityTrust/]',
+          message: 'Render untrusted text with Angular interpolation; bypass APIs are forbidden.',
+        },
+      ],
     },
   },
   {

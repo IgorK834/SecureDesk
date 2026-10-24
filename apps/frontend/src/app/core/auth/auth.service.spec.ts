@@ -2,7 +2,7 @@
 import '../../__fixtures__/test-environment';
 import { HttpErrorResponse } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { meResponse, unauthorized } from '../../__fixtures__/session';
 import { ApiClient } from '../http/api-client.service';
@@ -27,6 +27,7 @@ describe('AuthService.load()', () => {
     expect(auth.user()).toBeNull();
     expect(auth.authStage()).toBeNull();
     expect(auth.permissions()).toStrictEqual([]);
+    expect(auth.passwordPolicy()).toBeNull();
     expect(auth.loaded()).toBe(false);
   });
 
@@ -39,6 +40,7 @@ describe('AuthService.load()', () => {
     expect(auth.user()).toStrictEqual(me.user);
     expect(auth.authStage()).toBe('FULLY_AUTHENTICATED');
     expect(auth.permissions()).toStrictEqual(me.permissions);
+    expect(auth.passwordPolicy()).toStrictEqual(me.passwordPolicy);
     expect(auth.loaded()).toBe(true);
   });
 
@@ -96,6 +98,21 @@ describe('AuthService.load()', () => {
     expect(setItem).not.toHaveBeenCalled();
     expect(getItem).not.toHaveBeenCalled();
   });
+
+  it('does not restore a stale in-flight session after auth was cleared', async () => {
+    const answer = new Subject<MeResponse>();
+    const auth = createAuth(vi.fn(() => answer));
+    auth.setSession(meResponse('MANAGER'));
+
+    const loading = auth.load();
+    auth.clear();
+    answer.next(meResponse('MANAGER'));
+    answer.complete();
+    await loading;
+
+    expect(auth.user()).toBeNull();
+    expect(auth.permissions()).toStrictEqual([]);
+  });
 });
 
 describe('AuthService.has()', () => {
@@ -149,6 +166,33 @@ describe('AuthService.clear()', () => {
 
     expect(auth.user()).toBeNull();
     expect(auth.authStage()).toBeNull();
+    expect(auth.passwordPolicy()).toBeNull();
     expect(auth.has('tickets:create')).toBe(false);
+  });
+});
+
+describe('AuthService.setSession()', () => {
+  it('preserves /me-only permissions and policy across a password rotation for the same user', async () => {
+    const me = meResponse('EMPLOYEE', 'INITIAL_PASSWORD_CHANGE');
+    const auth = signedInAs(me);
+    await auth.load();
+
+    auth.setSession({ user: me.user, authStage: 'FULLY_AUTHENTICATED' });
+
+    expect(auth.permissions()).toStrictEqual(me.permissions);
+    expect(auth.passwordPolicy()).toStrictEqual(me.passwordPolicy);
+  });
+
+  it('does not carry session data across users when a login response has no permissions', async () => {
+    const previous = meResponse('ADMINISTRATOR');
+    const next = meResponse('GUEST');
+    const auth = signedInAs(previous);
+    await auth.load();
+
+    auth.setSession({ user: next.user, authStage: next.authStage });
+
+    expect(auth.user()).toStrictEqual(next.user);
+    expect(auth.permissions()).toStrictEqual([]);
+    expect(auth.passwordPolicy()).toBeNull();
   });
 });

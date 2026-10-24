@@ -107,7 +107,17 @@ const MESSAGES: Record<string, Record<string, string>> = {
       </div>
 
       @if (roleIsFixed()) {
-        <p>The role of the permanent ADMIN account cannot be changed.</p>
+        <div class="field">
+          <label for="user-role">Role</label>
+          <select
+            id="user-role"
+            disabled
+            title="The role of the permanent ADMIN account cannot be changed."
+          >
+            <option>Administrator</option>
+          </select>
+          <p>The role of the permanent ADMIN account cannot be changed.</p>
+        </div>
       } @else {
         <div class="field">
           <label for="user-role">Role</label>
@@ -129,7 +139,7 @@ const MESSAGES: Record<string, Record<string, string>> = {
       }
 
       @if (formError(); as text) {
-        <p role="alert" class="error">{{ text }}</p>
+        <p role="alert" aria-live="assertive" class="error">{{ text }}</p>
       }
 
       <button type="submit" [disabled]="busy()">

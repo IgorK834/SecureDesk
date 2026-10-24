@@ -44,7 +44,8 @@ describe('TemporaryPasswordDialogComponent', () => {
     flush();
 
     expect(dialog.hasAttribute('open')).toBe(true);
-    expect(root.querySelector('output')?.textContent).toBe(PASSWORD);
+    expect(root.querySelector<HTMLInputElement>('#temporary-password-value')?.value).toBe(PASSWORD);
+    expect(root.querySelector<HTMLInputElement>('#temporary-password-value')?.readOnly).toBe(true);
     expect(root.textContent).toContain('newbie');
     expect(root.textContent).toContain('only once');
     expect(root.textContent).toMatch(/Valid until .*2030/);
@@ -73,7 +74,7 @@ describe('TemporaryPasswordDialogComponent', () => {
     expect(root.textContent).toContain('old one no longer works');
     expect(root.textContent).not.toContain('has been created');
     // Whatever the reason, it is the same one-time reveal.
-    expect(root.querySelector('output')?.textContent).toBe(PASSWORD);
+    expect(root.querySelector<HTMLInputElement>('#temporary-password-value')?.value).toBe(PASSWORD);
     expect(root.textContent).toContain('only once');
   });
 
@@ -86,7 +87,7 @@ describe('TemporaryPasswordDialogComponent', () => {
     flush();
 
     expect(dialog.hasAttribute('open')).toBe(true);
-    expect(root.querySelector('output')?.textContent).toBe(PASSWORD);
+    expect(root.querySelector<HTMLInputElement>('#temporary-password-value')?.value).toBe(PASSWORD);
   });
 
   it('stays open, and unresolved, until the administrator says they saved it', async () => {
@@ -108,13 +109,14 @@ describe('TemporaryPasswordDialogComponent', () => {
     const { component, button, root, flush } = setUp();
     const closed = component.open(DETAILS);
     flush();
-    expect(root.innerHTML).toContain(PASSWORD);
+    expect(root.querySelector<HTMLInputElement>('#temporary-password-value')?.value).toBe(PASSWORD);
 
     button('I have saved the password')?.click();
     await closed;
     flush();
 
     expect(root.innerHTML).not.toContain(PASSWORD);
+    expect(root.querySelector('#temporary-password-value')).toBeNull();
     expect(root.textContent).not.toContain('newbie');
   });
 
@@ -125,7 +127,7 @@ describe('TemporaryPasswordDialogComponent', () => {
     void component.open(DETAILS);
     flush();
 
-    button('Copy password')?.click();
+    button('Copy')?.click();
     await Promise.resolve();
     await Promise.resolve();
     flush();
@@ -142,7 +144,7 @@ describe('TemporaryPasswordDialogComponent', () => {
     void component.open(DETAILS);
     flush();
 
-    button('Copy password')?.click();
+    button('Copy')?.click();
     await Promise.resolve();
     await Promise.resolve();
     flush();
@@ -156,7 +158,7 @@ describe('TemporaryPasswordDialogComponent', () => {
     void component.open(DETAILS);
     flush();
 
-    button('Copy password')?.click();
+    button('Copy')?.click();
     await Promise.resolve();
     flush();
 
@@ -184,7 +186,7 @@ describe('TemporaryPasswordDialogComponent', () => {
     const { component, button, root, flush } = setUp();
     const first = component.open(DETAILS);
     flush();
-    button('Copy password')?.click();
+    button('Copy')?.click();
     await Promise.resolve();
     await Promise.resolve();
     button('I have saved the password')?.click();
@@ -205,6 +207,6 @@ describe('TemporaryPasswordDialogComponent', () => {
     flush();
 
     expect(second).toBe(first);
-    expect(root.querySelector('output')?.textContent).toBe(PASSWORD);
+    expect(root.querySelector<HTMLInputElement>('#temporary-password-value')?.value).toBe(PASSWORD);
   });
 });

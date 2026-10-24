@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { Component, ElementRef, ViewChild, signal } from '@angular/core';
+import { Component, ElementRef, OnDestroy, ViewChild, signal } from '@angular/core';
 
 export interface TemporaryPasswordDetails {
   login: string;
@@ -42,15 +42,23 @@ export interface TemporaryPasswordDetails {
             now: <strong>it is shown only once</strong> and cannot be retrieved later.
           </p>
         }
+        <p><strong>This password is shown only once. Store it now.</strong></p>
         <p>
-          <output class="password" aria-label="Temporary password">{{ d.password }}</output>
+          <label for="temporary-password-value">Temporary password</label>
+          <input
+            id="temporary-password-value"
+            class="password"
+            type="text"
+            [value]="d.password"
+            readonly
+          />
         </p>
         <p>
           Valid until {{ d.expiresAt | date: 'medium' }}. The user must replace it at the first
           sign-in.
         </p>
         <div class="actions">
-          <button type="button" (click)="copy(d.password)">Copy password</button>
+          <button type="button" (click)="copy(d.password)">Copy</button>
           <button type="button" autofocus (click)="dialog.close()">
             I have saved the password
           </button>
@@ -78,13 +86,17 @@ export interface TemporaryPasswordDetails {
     }
   `,
 })
-export class TemporaryPasswordDialogComponent {
+export class TemporaryPasswordDialogComponent implements OnDestroy {
   // Static: the <dialog> is always in the template, never inside a conditional block.
   @ViewChild('dialog', { static: true }) private dialog!: ElementRef<HTMLDialogElement>;
 
   protected readonly details = signal<TemporaryPasswordDetails | null>(null);
   protected readonly copyStatus = signal('');
   private pending: { promise: Promise<void>; settle: () => void } | null = null;
+
+  ngOnDestroy(): void {
+    this.clear();
+  }
 
   /** Opens the dialog; resolves once the administrator has confirmed they saved the password. */
   open(details: TemporaryPasswordDetails): Promise<void> {
@@ -110,6 +122,10 @@ export class TemporaryPasswordDialogComponent {
 
   protected onClose(): void {
     // The plaintext leaves the page here, whichever way the dialog was closed.
+    this.clear();
+  }
+
+  private clear(): void {
     this.details.set(null);
     this.copyStatus.set('');
 

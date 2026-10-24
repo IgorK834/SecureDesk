@@ -1,6 +1,26 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  plugins: [
+    {
+      name: 'angular-inline-component-resources',
+      enforce: 'pre',
+      transform(source, id) {
+        if (!id.endsWith('.ts')) return;
+        const inline = (match: string, property: string, relativePath: string) => {
+          const contents = readFileSync(resolve(dirname(id), relativePath), 'utf8');
+          return property === 'templateUrl'
+            ? `template: ${JSON.stringify(contents)}`
+            : `styles: [${JSON.stringify(contents)}]`;
+        };
+        return source
+          .replace(/(templateUrl):\s*['"](.+?)['"]/g, inline)
+          .replace(/(styleUrl):\s*['"](.+?)['"]/g, inline);
+      },
+    },
+  ],
   test: {
     environment: 'node',
     setupFiles: ['tests/helpers/clean-env.ts'],

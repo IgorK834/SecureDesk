@@ -434,7 +434,9 @@ describe('UserDetailComponent: resetting a password', () => {
 
     expect(t.api.resetPassword).toHaveBeenCalledExactlyOnceWith('u-1');
     expect(t.revealDialog().hasAttribute('open')).toBe(true);
-    expect(t.revealDialog().querySelector('output')?.textContent).toBe(SECRET);
+    expect(
+      t.revealDialog().querySelector<HTMLInputElement>('#temporary-password-value')?.value,
+    ).toBe(SECRET);
     expect(t.revealDialog().textContent).toContain('The password of jan.k has been reset');
     expect(t.revealDialog().textContent).toContain('only once');
   });
@@ -459,8 +461,9 @@ describe('UserDetailComponent: resetting a password', () => {
 
     await t.act('Reset password', 'confirm');
 
-    expect(t.root.innerHTML.split(SECRET)).toHaveLength(2); // once: inside the dialog
-    expect(t.revealDialog().innerHTML).toContain(SECRET);
+    expect(
+      t.revealDialog().querySelector<HTMLInputElement>('#temporary-password-value')?.value,
+    ).toBe(SECRET);
     expect(t.router.url).not.toContain(SECRET);
     expect(JSON.stringify(history.state)).not.toContain(SECRET);
     expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain(SECRET);
@@ -491,7 +494,9 @@ describe('UserDetailComponent: resetting a password', () => {
 
     await t.act('Reset password', 'confirm');
 
-    expect(t.revealDialog().querySelector('output')?.textContent).toBe('Z7!pLm2#qW9xRt4v');
+    expect(
+      t.revealDialog().querySelector<HTMLInputElement>('#temporary-password-value')?.value,
+    ).toBe('Z7!pLm2#qW9xRt4v');
     expect(t.root.innerHTML).not.toContain(SECRET);
   });
 
@@ -512,7 +517,7 @@ describe('UserDetailComponent: resetting a password', () => {
 
       expect(t.root.querySelector('[role="alert"]')?.textContent).toBe(message);
       expect(t.revealDialog().hasAttribute('open')).toBe(false);
-      expect(t.root.querySelector('output')).toBeNull();
+      expect(t.root.querySelector('#temporary-password-value')).toBeNull();
       expect(t.root.querySelector('app-user-status-badge')?.textContent).toContain('Active');
       expect(t.button('Reset password')?.disabled).toBe(false);
     },
@@ -562,7 +567,9 @@ describe('UserDetailComponent: resetting a password', () => {
     await t.settle();
 
     expect(t.api.resetPassword).toHaveBeenCalledExactlyOnceWith('u-admin');
-    expect(t.revealDialog().querySelector('output')?.textContent).toBe(SECRET);
+    expect(
+      t.revealDialog().querySelector<HTMLInputElement>('#temporary-password-value')?.value,
+    ).toBe(SECRET);
   });
 });
 

@@ -269,7 +269,9 @@ describe('UserFormComponent: the one-time temporary password', () => {
     t.submit();
 
     expect(t.passwordDialog().hasAttribute('open')).toBe(true);
-    expect(t.passwordDialog().textContent).toContain(PASSWORD);
+    expect(
+      t.passwordDialog().querySelector<HTMLInputElement>('#temporary-password-value')?.value,
+    ).toBe(PASSWORD);
     expect(t.passwordDialog().textContent).toContain('new.user');
     expect(t.passwordDialog().textContent).toContain('shown only once');
   });
@@ -539,10 +541,13 @@ describe('UserFormComponent: editing an account', () => {
       role: 'ADMINISTRATOR',
     });
 
-    it('does not offer a role at all, and says why', () => {
+    it('shows the protected role as disabled with an explanatory tooltip', () => {
       const t = setUp({ user: admin });
 
-      expect(t.field('user-role')).toBeNull();
+      expect(t.field('user-role').disabled).toBe(true);
+      expect(t.field('user-role').title).toBe(
+        'The role of the permanent ADMIN account cannot be changed.',
+      );
       expect(t.text()).toContain('The role of the permanent ADMIN account cannot be changed.');
     });
 
@@ -558,7 +563,7 @@ describe('UserFormComponent: editing an account', () => {
     it('is treated as protected whatever the case or Unicode form of its login', () => {
       const t = setUp({ user: adminUser({ login: 'ａｄｍｉｎ', role: 'ADMINISTRATOR' }) });
 
-      expect(t.field('user-role')).toBeNull();
+      expect(t.field('user-role').disabled).toBe(true);
     });
 
     it('does not treat a lookalike login as the protected one', () => {

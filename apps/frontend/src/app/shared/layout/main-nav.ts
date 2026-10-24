@@ -12,6 +12,7 @@ import { visibleNavItems } from './nav-items';
       <nav aria-label="Main">
         <ul>
           <li><a routerLink="/dashboard">Dashboard</a></li>
+          <li><a routerLink="/account/change-password">Change password</a></li>
           @for (item of items(); track item.route) {
             <li>
               <a [routerLink]="item.route">{{ item.label }}</a>

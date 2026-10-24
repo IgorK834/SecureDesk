@@ -1,4 +1,9 @@
-import { provideHttpClient, withFetch } from '@angular/common/http';
+import {
+  provideHttpClient,
+  withFetch,
+  withInterceptors,
+  withXsrfConfiguration,
+} from '@angular/common/http';
 import {
   ApplicationConfig,
   inject,
@@ -8,12 +13,17 @@ import {
 import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
 import { AuthService } from './core/auth/auth.service';
+import { authInterceptor } from './core/http/auth.interceptor';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes),
-    provideHttpClient(withFetch()),
+    provideHttpClient(
+      withFetch(),
+      withXsrfConfiguration({ cookieName: 'XSRF-TOKEN', headerName: 'X-XSRF-TOKEN' }),
+      withInterceptors([authInterceptor]),
+    ),
     // Rebuild the session from the server cookie before the first navigation, so that a reload
     // on /dashboard stays signed in and the guards never run against a still-empty state.
     provideAppInitializer(() => inject(AuthService).load()),

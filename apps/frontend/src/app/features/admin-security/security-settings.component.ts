@@ -67,7 +67,7 @@ const MESSAGES: Record<NumberField, Record<string, string>> = {
     <h1>Security settings</h1>
 
     @if (loadError(); as text) {
-      <p role="alert" class="error">{{ text }}</p>
+      <p role="alert" aria-live="assertive" class="error">{{ text }}</p>
     } @else if (!loaded()) {
       <p role="status">Loading the settings…</p>
     } @else {
@@ -153,10 +153,10 @@ const MESSAGES: Record<NumberField, Record<string, string>> = {
         </div>
 
         @if (formError(); as text) {
-          <p role="alert" class="error">{{ text }}</p>
+          <p role="alert" aria-live="assertive" class="error">{{ text }}</p>
         }
         @if (notice(); as text) {
-          <p role="status">{{ text }}</p>
+          <p role="status" aria-live="polite">{{ text }}</p>
         }
 
         @if (auth.has('security-settings:update')) {
