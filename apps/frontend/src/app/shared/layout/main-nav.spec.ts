@@ -18,7 +18,12 @@ describe('MainNav', () => {
   it('shows the Administrator user administration and no ticket link', async () => {
     const links = await linksFor(meResponse('ADMINISTRATOR'));
 
-    expect(links).toStrictEqual(['/dashboard', '/admin/users', '/admin/security']);
+    expect(links).toStrictEqual([
+      '/dashboard',
+      '/account/change-password',
+      '/admin/users',
+      '/admin/security',
+    ]);
     expect(links.filter((href) => href.startsWith('/tickets'))).toStrictEqual([]);
   });
 
@@ -27,7 +32,12 @@ describe('MainNav', () => {
     async (role) => {
       const links = await linksFor(meResponse(role));
 
-      expect(links).toStrictEqual(['/dashboard', '/tickets', '/tickets/new']);
+      expect(links).toStrictEqual([
+        '/dashboard',
+        '/account/change-password',
+        '/tickets',
+        '/tickets/new',
+      ]);
       expect(links.filter((href) => href.startsWith('/admin'))).toStrictEqual([]);
     },
   );
