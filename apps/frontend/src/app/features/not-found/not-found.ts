@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, Input } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
 /**
@@ -9,9 +9,11 @@ import { RouterLink } from '@angular/router';
   selector: 'app-not-found',
   imports: [RouterLink],
   template: `
-    <h1>Page not found</h1>
+    <h1>{{ heading }}</h1>
     <p>This page does not exist, or you are not allowed to see it.</p>
     <a routerLink="/dashboard">Back to the dashboard</a>
   `,
 })
-export class NotFound {}
+export class NotFound {
+  @Input() heading = 'Page not found';
+}
