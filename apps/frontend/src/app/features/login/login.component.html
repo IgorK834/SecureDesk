@@ -1,0 +1,55 @@
+<main class="login-page">
+  <h1>Sign in</h1>
+
+  @if (banner; as text) {
+    <p class="banner" role="status">{{ text }}</p>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <div class="field">
+      <label for="login">Login</label>
+      <input
+        id="login"
+        formControlName="login"
+        autocomplete="username"
+        [attr.aria-invalid]="fieldError('login') ? true : null"
+        [attr.aria-describedby]="fieldError('login') ? 'login-error' : null"
+        (keydown.enter)="submitOnEnter($event)"
+      />
+      @if (fieldError('login'); as text) {
+        <p id="login-error" class="field-error">{{ text }}</p>
+      }
+    </div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <input
+        id="password"
+        type="password"
+        formControlName="password"
+        autocomplete="current-password"
+        [attr.aria-invalid]="fieldError('password') ? true : null"
+        [attr.aria-describedby]="fieldError('password') ? 'password-error' : null"
+        (keydown.enter)="submitOnEnter($event)"
+      />
+      @if (fieldError('password'); as text) {
+        <p id="password-error" class="field-error">{{ text }}</p>
+      }
+    </div>
+
+    <div class="request-error" role="alert" aria-live="polite">
+      @if (errorMessage(); as text) {
+        <p>{{ text }}</p>
+      }
+    </div>
+
+    <button type="submit" [disabled]="submitting()">
+      @if (submitting()) {
+        <span class="spinner" aria-hidden="true"></span>
+        Signing in…
+      } @else {
+        Sign in
+      }
+    </button>
+  </form>
+</main>

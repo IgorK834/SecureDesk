@@ -1,0 +1,63 @@
+.login-page {
+  max-width: 26rem;
+  margin: 2rem auto;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-block: 1rem;
+}
+
+input {
+  font: inherit;
+  padding: 0.5rem;
+}
+
+.field-error,
+.request-error {
+  color: #b3261e;
+}
+
+.field-error,
+.request-error p {
+  margin: 0.25rem 0 0;
+}
+
+.request-error {
+  min-height: 1.75rem;
+}
+
+.banner {
+  padding: 0.75rem;
+  background: #eef4ff;
+  border-inline-start: 0.25rem solid #315da8;
+}
+
+button {
+  min-width: 7rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.spinner {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  margin-inline-end: 0.35rem;
+  border: 0.15rem solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
