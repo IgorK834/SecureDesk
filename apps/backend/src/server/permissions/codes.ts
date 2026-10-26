@@ -9,6 +9,7 @@ export const PERMISSIONS = {
   USERS_BLOCK: 'users:block',
   USERS_DELETE: 'users:delete',
   USERS_RESET_PASSWORD: 'users:reset-password',
+  USERS_RESET_TOTP: 'users:reset-totp',
   SECURITY_SETTINGS_READ: 'security-settings:read',
   SECURITY_SETTINGS_UPDATE: 'security-settings:update',
   TICKETS_CREATE: 'tickets:create',

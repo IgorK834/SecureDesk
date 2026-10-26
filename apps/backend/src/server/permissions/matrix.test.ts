@@ -22,6 +22,7 @@ describe('exact permission set of each role (backlog section 5, least privilege)
         'users:block',
         'users:delete',
         'users:reset-password',
+        'users:reset-totp',
         'security-settings:read',
         'security-settings:update',
       ].sort(),
@@ -73,7 +74,7 @@ describe('exact permission set of each role (backlog section 5, least privilege)
     expect(startingWith(ROLES.ADMINISTRATOR, 'tickets:')).toEqual([]);
   });
 
-  it('grants nothing outside the 15 defined codes (a typo in the matrix would be caught here)', () => {
+  it('grants nothing outside the 16 defined codes (a typo in the matrix would be caught here)', () => {
     const defined = new Set<string>(Object.values(PERMISSIONS));
 
     for (const role of Object.values(ROLES)) {
@@ -87,7 +88,7 @@ describe('exact permission set of each role (backlog section 5, least privilege)
 
 describe('role/permission matrix (backlog section 5)', () => {
   it.each([
-    [ROLES.ADMINISTRATOR, 8],
+    [ROLES.ADMINISTRATOR, 9],
     [ROLES.MANAGER, 7],
     [ROLES.EMPLOYEE, 4],
     [ROLES.GUEST, 2],
@@ -104,6 +105,7 @@ describe('role/permission matrix (backlog section 5)', () => {
       PERMISSIONS.USERS_BLOCK,
       PERMISSIONS.USERS_DELETE,
       PERMISSIONS.USERS_RESET_PASSWORD,
+      PERMISSIONS.USERS_RESET_TOTP,
       PERMISSIONS.SECURITY_SETTINGS_READ,
       PERMISSIONS.SECURITY_SETTINGS_UPDATE,
     ];

@@ -8,6 +8,7 @@ export interface SafeUser {
   lastName: string;
   roleId: string;
   mustChangePassword: boolean;
+  totpEnabled: boolean;
   isBlocked: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -105,6 +106,7 @@ export function toSafeUser(row: UserRow): SafeUser {
     lastName: row.lastName,
     roleId: row.roleId,
     mustChangePassword: row.mustChangePassword,
+    totpEnabled: row.totpEnabledAt !== null,
     isBlocked: row.isBlocked,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

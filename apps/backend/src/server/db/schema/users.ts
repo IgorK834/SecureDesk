@@ -5,8 +5,8 @@ import { roles } from './roles';
 
 /**
  * Accounts. A user has exactly one role (`role_id` is NOT NULL with an enforced foreign key)
- * and the only credential column is `password_hash` (an Argon2id encoded hash, never a
- * password). Accounts are soft-deleted (`deleted_at`), never removed, so sessions, history
+ * and credential material is stored only as a password hash or an encrypted TOTP secret.
+ * Accounts are soft-deleted (`deleted_at`), never removed, so sessions, history
  * and tickets keep a valid owner.
  *
  * Uniqueness of the login is enforced on `login_normalized`, which callers fill with
@@ -31,6 +31,9 @@ export const users = sqliteTable(
     mustChangePassword: integer('must_change_password', { mode: 'boolean' }).notNull(),
     temporaryPasswordExpiresAt: integer('temporary_password_expires_at', { mode: 'timestamp_ms' }),
     passwordChangedAt: integer('password_changed_at', { mode: 'timestamp_ms' }),
+    totpSecretEncrypted: text('totp_secret_encrypted'),
+    totpEnabledAt: integer('totp_enabled_at', { mode: 'timestamp_ms' }),
+    totpLastUsedStep: integer('totp_last_used_step'),
     isBlocked: integer('is_blocked', { mode: 'boolean' }).notNull().default(false),
     deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })

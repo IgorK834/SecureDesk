@@ -138,6 +138,7 @@ describe('resolveSession: who the token belongs to', () => {
       'login',
       'mustChangePassword',
       'roleId',
+      'totpEnabled',
       'updatedAt',
     ]);
     expect([...(resolved?.permissions ?? [])].sort()).toStrictEqual(

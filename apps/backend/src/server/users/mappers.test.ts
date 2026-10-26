@@ -14,6 +14,9 @@ const row: UserRow = {
   mustChangePassword: true,
   temporaryPasswordExpiresAt: new Date('2030-01-01T12:00:00.000Z'),
   passwordChangedAt: new Date('2029-12-31T00:00:00.000Z'),
+  totpSecretEncrypted: null,
+  totpEnabledAt: null,
+  totpLastUsedStep: null,
   isBlocked: false,
   deletedAt: new Date('2030-02-01T00:00:00.000Z'),
   createdAt: new Date('2029-12-01T00:00:00.000Z'),
@@ -28,6 +31,8 @@ const WITHHELD = [
   'loginNormalized',
   'temporaryPasswordExpiresAt',
   'passwordChangedAt',
+  'totpSecretEncrypted',
+  'totpLastUsedStep',
 ];
 
 describe('toSafeUser', () => {
@@ -48,6 +53,7 @@ describe('toSafeUser', () => {
       lastName: 'Wiśniewska',
       roleId: 'employee',
       mustChangePassword: true,
+      totpEnabled: false,
       isBlocked: false,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -62,7 +68,9 @@ describe('toSafeUser', () => {
   });
 
   it('accounts for every users column: each is either exposed or explicitly withheld', () => {
-    const exposed = Object.keys(toSafeUser(row));
+    const exposed = Object.keys(toSafeUser(row)).map((key) =>
+      key === 'totpEnabled' ? 'totpEnabledAt' : key,
+    );
     const columns = Object.keys(getTableColumns(users));
 
     expect([...exposed, ...WITHHELD].sort()).toEqual([...columns].sort());
@@ -111,7 +119,14 @@ describe('toProfile', () => {
 
 // The administrator's view exposes more than `toSafeUser` (the password state) but still never a
 // credential. As above, a new `users` column fails the completeness test until it is classified.
-const ADMIN_WITHHELD = ['passwordHash', 'deletedAt', 'loginNormalized'];
+const ADMIN_WITHHELD = [
+  'passwordHash',
+  'deletedAt',
+  'loginNormalized',
+  'totpSecretEncrypted',
+  'totpEnabledAt',
+  'totpLastUsedStep',
+];
 
 describe('toAdminUserDto', () => {
   it('copies exactly the allowlisted fields, with the role as an upper-case code', () => {

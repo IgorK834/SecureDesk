@@ -40,6 +40,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionCode, string> = {
   [P.USERS_BLOCK]: 'Block and unblock user accounts',
   [P.USERS_DELETE]: 'Delete user accounts',
   [P.USERS_RESET_PASSWORD]: "Reset another user's password",
+  [P.USERS_RESET_TOTP]:
+    "Reset another user's two-factor authentication after identity verification",
   [P.SECURITY_SETTINGS_READ]: 'Read global security settings',
   [P.SECURITY_SETTINGS_UPDATE]: 'Change global security settings',
   [P.TICKETS_CREATE]: 'Create a ticket',
@@ -59,6 +61,7 @@ export const ROLE_PERMISSIONS: Record<RoleId, readonly PermissionCode[]> = {
     P.USERS_BLOCK,
     P.USERS_DELETE,
     P.USERS_RESET_PASSWORD,
+    P.USERS_RESET_TOTP,
     P.SECURITY_SETTINGS_READ,
     P.SECURITY_SETTINGS_UPDATE,
   ],
