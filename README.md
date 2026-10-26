@@ -2,7 +2,10 @@
 
 **SecureDesk** is a security-focused web application developed as an academic project for a **Cybersecurity** course.
 
-The project is planned as a simple internal helpdesk system, with an emphasis on building secure authentication, authorization, and user management from the start. It will be developed incrementally as new course requirements are introduced.
+It is a deliberately small internal helpdesk demonstrator whose complete security path is usable:
+authentication, forced and ordinary password changes, revocable cookie sessions, CSRF protection,
+RBAC, user/security administration, ticket object authorization and optional TOTP two-factor
+authentication.
 
 ## Tech Stack
 
@@ -20,15 +23,17 @@ The project is planned as a simple internal helpdesk system, with an emphasis on
 - Apply secure development practices and test common security risks.
 - Leave room for future features such as helpdesk tickets, security logging, and multi-factor authentication.
 
-## Current Status
+## Current status
 
-🚧 **Early development** — the monorepo skeleton (SD-01) is in place: both apps build, lint, type-check and run together, and the Angular app reaches the backend through the same-origin `/api` proxy. Authentication, RBAC, the database and the admin UI are added in later tasks.
+The Module 1 implementation and its browser/API evidence are complete. The in-memory limiter and
+single-process SQLite deployment are documented limitations; this is a course project, not a
+production helpdesk service.
 
 ## Prerequisites
 
 - **Node.js 24 (current LTS)**, version pinned in `.nvmrc` (`nvm use` picks it up). Angular 22 also supports Node 26, but the repo targets 24 (`engines`), so newer Node prints an `EBADENGINE` warning that can be ignored.
 - **npm** (ships with Node 24).
-- `openssl` (only to generate the CSRF secret).
+- `openssl` (to generate independent CSRF and TOTP-encryption keys).
 
 ## Install
 
@@ -37,15 +42,27 @@ npm ci
 cp .env.example .env
 ```
 
-`.env` is git-ignored. Only `.env.example` (placeholders, no secrets) is tracked. Replace `CSRF_SECRET` with a real value before using anything other than the skeleton:
+`.env` is git-ignored. Only `.env.example` (placeholders, no secrets) is tracked. Generate two
+independent 32-byte values and put them in `CSRF_SECRET` and `TOTP_ENCRYPTION_KEY`:
 
 ```bash
+openssl rand -base64 32
 openssl rand -base64 32
 ```
 
 > The backend reads this single root `.env` (Next.js via `next.config.ts`, the `db:*` scripts via `--env-file-if-exists`). Relative paths such as `DATABASE_PATH` are resolved from `apps/backend`.
 
-## Run
+## Prepare the database and run
+
+```bash
+npm run db:migrate
+npm run db:seed
+```
+
+The seed creates `ADMIN` plus six non-administrator demonstration accounts. It writes generated
+one-time passwords to `apps/backend/.local/initial-credentials.txt` with owner-only permissions;
+that file is git-ignored and the terminal never prints a password. Open it locally, sign in, and
+replace each temporary password. Delete the file after delivery.
 
 ```bash
 npm run dev
@@ -81,9 +98,15 @@ npm run format:check      # or: npm run format
 
 ```bash
 npm test                  # vitest run --coverage
+npx playwright install chromium   # once per machine
+npx playwright test               # real browser, isolated E2E database, includes @slow
 ```
 
 Coverage uses V8 and **fails the run below 80%** for lines, statements, functions and branches (`vitest.config.ts`).
+Playwright resets only `data/securedesk.e2e.sqlite`, migrates and seeds it, and stores generated
+test credentials in the git-ignored `tests/e2e/.credentials.json`. The `@slow` inactivity case
+takes about 65 seconds. Browser evidence is reproduced under `docs/report-evidence/`; no development
+database or committed credential is used.
 
 ## Database
 
@@ -142,6 +165,16 @@ docs/            architecture, database schema, permissions, threat model, repor
 tests/           cross-app tests (added in later tasks)
 ```
 
+## Further documentation
+
+- [Architecture and security design](docs/architecture.md)
+- [Database schema and ER diagram](docs/database-schema.md)
+- [Permission matrix](docs/permissions.md)
+- [Threat model](docs/threat-model.md)
+- [Test traceability](docs/testing.md)
+- [Report evidence](docs/report-evidence/README.md)
+
 ## Purpose
 
-SecureDesk is a learning project intended to demonstrate practical cybersecurity concepts in a real web application. It is **not currently intended for production use**.
+SecureDesk is a learning project intended to demonstrate practical cybersecurity concepts in a
+real web application. It is **not intended for production use**.
