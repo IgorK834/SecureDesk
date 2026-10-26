@@ -1,0 +1,78 @@
+erDiagram
+    roles ||--o{ users : "role_id"
+    roles ||--o{ role_permissions : "role_id"
+    permissions ||--o{ role_permissions : "permission_id"
+    users ||--o{ password_history : "user_id"
+    users ||--o{ sessions : "user_id"
+    users |o--o{ security_settings : "updated_by"
+    users ||--o{ tickets : "created_by_user_id"
+    users |o--o{ tickets : "assigned_to_user_id"
+
+    roles {
+        TEXT id PK "stable key"
+        TEXT name UK
+        TEXT description
+    }
+    permissions {
+        TEXT id PK "equals code"
+        TEXT code UK
+        TEXT description
+    }
+    role_permissions {
+        TEXT role_id PK,FK
+        TEXT permission_id PK,FK
+    }
+    users {
+        TEXT id PK "UUID"
+        TEXT login
+        TEXT login_normalized UK
+        TEXT first_name
+        TEXT last_name
+        TEXT role_id FK
+        TEXT password_hash "Argon2id"
+        INTEGER must_change_password
+        INTEGER temporary_password_expires_at
+        INTEGER password_changed_at
+        TEXT totp_secret_encrypted "AES-256-GCM"
+        INTEGER totp_enabled_at
+        INTEGER totp_last_used_step
+        INTEGER is_blocked
+        INTEGER deleted_at
+        INTEGER created_at
+        INTEGER updated_at
+    }
+    password_history {
+        TEXT id PK
+        TEXT user_id FK
+        TEXT password_hash "Argon2id"
+        INTEGER created_at
+    }
+    sessions {
+        TEXT id PK
+        TEXT user_id FK
+        TEXT token_hash UK
+        INTEGER created_at
+        INTEGER last_activity_at
+        INTEGER expires_at
+        INTEGER revoked_at
+        TEXT auth_stage
+    }
+    security_settings {
+        INTEGER id PK
+        INTEGER min_password_length
+        INTEGER reject_personal_data_in_password
+        INTEGER password_max_age_days
+        INTEGER session_idle_timeout_minutes
+        INTEGER updated_at
+        TEXT updated_by FK
+    }
+    tickets {
+        TEXT id PK
+        TEXT title
+        TEXT description
+        TEXT status
+        TEXT created_by_user_id FK
+        TEXT assigned_to_user_id FK
+        INTEGER created_at
+        INTEGER updated_at
+    }
