@@ -63,6 +63,7 @@ describe('GET /api/auth/me: signed in', () => {
       },
       authStage: 'FULLY_AUTHENTICATED',
       mustChangePassword: false,
+      totpEnabled: false,
       permissions: [...ROLE_PERMISSIONS[ROLES.EMPLOYEE]].sort(),
       passwordPolicy: { minPasswordLength: 12, rejectPersonalDataInPassword: false },
     });

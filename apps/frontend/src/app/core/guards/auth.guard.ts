@@ -12,6 +12,7 @@ import { AuthService } from '../auth/auth.service';
 const FORCED_ROUTE: Partial<Record<AuthStage, string>> = {
   INITIAL_PASSWORD_CHANGE: '/change-initial-password',
   PASSWORD_EXPIRED: '/account/change-password',
+  TOTP_CHALLENGE: '/totp-challenge',
 };
 
 /** Requires a signed-in user, and keeps a restricted session on its password-change page. */

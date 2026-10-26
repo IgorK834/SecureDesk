@@ -25,6 +25,7 @@ The file is chosen from the root `.env`:
 | -------------------- | ------------------- | ------------------------------- |
 | `DATABASE_PATH`      | `NODE_ENV` ≠ `test` | `./data/securedesk.dev.sqlite`  |
 | `TEST_DATABASE_PATH` | `NODE_ENV=test`     | `./data/securedesk.test.sqlite` |
+| `E2E_DATABASE_PATH`  | Playwright run      | `./data/securedesk.e2e.sqlite`  |
 
 Relative paths are resolved from `apps/backend`, which is the working directory of every npm script. Every entry point (`db:migrate`, `db:reset:*`, `db:generate`, the Next.js app) fails immediately with a readable message and a non-zero exit code when:
 
@@ -102,7 +103,7 @@ The seed (`src/server/db/seeds/`, entry point `scripts/seed.ts`) creates, in one
 | What                | Content                                                                                                                 |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Roles               | Administrator, Manager (Kierownik), Employee (Pracownik), Guest (Gość), with stable ids from `ROLES`                    |
-| Permissions         | the 15 codes of `PERMISSIONS`, linked to roles by the matrix in `src/server/permissions/matrix.ts` (21 links)           |
+| Permissions         | the 16 codes of `PERMISSIONS`, linked to roles by the matrix in `src/server/permissions/matrix.ts` (22 links)           |
 | `security_settings` | the single row: minimum length 12, personal-data rule off, expiry disabled, idle timeout 15 minutes                     |
 | Accounts            | `ADMIN` (Administrator, System Administrator) plus `manager1`, `manager2`, `employee1`, `employee2`, `guest1`, `guest2` |
 
@@ -164,6 +165,9 @@ erDiagram
         INTEGER must_change_password "boolean"
         INTEGER temporary_password_expires_at "nullable timestamp"
         INTEGER password_changed_at "nullable timestamp"
+        TEXT totp_secret_encrypted "nullable AES-256-GCM envelope"
+        INTEGER totp_enabled_at "nullable timestamp"
+        INTEGER totp_last_used_step "nullable replay counter"
         INTEGER is_blocked "boolean, default 0"
         INTEGER deleted_at "nullable timestamp, soft delete"
         INTEGER created_at "timestamp"
@@ -185,7 +189,7 @@ erDiagram
         INTEGER last_activity_at "timestamp"
         INTEGER expires_at "timestamp"
         INTEGER revoked_at "nullable timestamp"
-        TEXT auth_stage "CHECK: INITIAL_PASSWORD_CHANGE, PASSWORD_EXPIRED, FULLY_AUTHENTICATED"
+        TEXT auth_stage "CHECK: INITIAL_PASSWORD_CHANGE, PASSWORD_EXPIRED, TOTP_CHALLENGE, FULLY_AUTHENTICATED"
     }
 
     security_settings {
@@ -212,21 +216,26 @@ erDiagram
 
 A test (`schema/er-diagram.test.ts`) migrates an empty database and fails if this diagram disagrees with it about tables, columns, types, primary keys, unique columns or foreign keys, so the diagram cannot silently go stale.
 
+The report-ready export is generated from [`database-schema.mmd`](database-schema.mmd) and stored as
+[`report-evidence/er-diagram.png`](report-evidence/er-diagram.png):
+
+![SecureDesk entity-relationship diagram](report-evidence/er-diagram.png)
+
 ### Invariants and where they are enforced
 
-| Invariant                                            | Enforced by                                                                                                                                  |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Exactly one role per user                            | `users.role_id` is `NOT NULL` with a foreign key to `roles.id`                                                                               |
-| A login is unique regardless of case or Unicode      | unique index on `users.login_normalized`, always filled with `normalizeLogin()` (`src/server/users/login.ts`)                                |
-| Credentials are stored as hashes only                | the only credential columns are `users.password_hash`, `password_history.password_hash` and `sessions.token_hash`; a test fails on any other |
-| A session has one of three known auth stages         | `CHECK` on `sessions.auth_stage`                                                                                                             |
-| Sessions can be revoked without deleting them        | `sessions.revoked_at`                                                                                                                        |
-| One settings row; minimum password length never < 12 | `CHECK (id = 1)` and `CHECK (min_password_length >= 12)` on `security_settings`                                                              |
-| A ticket has one creator, at most one assignee       | `tickets.created_by_user_id` is `NOT NULL`; both it and the nullable `assigned_to_user_id` are foreign keys to `users.id`                    |
-| A ticket has one of three known statuses             | `CHECK` on `tickets.status`                                                                                                                  |
-| Who may read or change a ticket                      | not the database: `src/server/tickets/policy.ts` decides, see [permissions.md](permissions.md)                                               |
-| The permanent `ADMIN` account is protected           | triggers from migration `0001_protect_admin_account` (below) plus `assertNotProtectedAccount` in `src/server/users/account-service.ts`       |
-| Accounts are never hard-deleted by the application   | soft delete through `users.deleted_at`; foreign keys from sessions and history keep pointing at a real row                                   |
+| Invariant                                               | Enforced by                                                                                                                            |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Exactly one role per user                               | `users.role_id` is `NOT NULL` with a foreign key to `roles.id`                                                                         |
+| A login is unique regardless of case or Unicode         | unique index on `users.login_normalized`, always filled with `normalizeLogin()` (`src/server/users/login.ts`)                          |
+| Credentials are hashed; TOTP is authenticated-encrypted | password/history and session tokens are hashes; `users.totp_secret_encrypted` is AES-256-GCM, never plaintext                          |
+| A session has one of four known auth stages             | `CHECK` on `sessions.auth_stage`                                                                                                       |
+| Sessions can be revoked without deleting them           | `sessions.revoked_at`                                                                                                                  |
+| One settings row; minimum password length never < 12    | `CHECK (id = 1)` and `CHECK (min_password_length >= 12)` on `security_settings`                                                        |
+| A ticket has one creator, at most one assignee          | `tickets.created_by_user_id` is `NOT NULL`; both it and the nullable `assigned_to_user_id` are foreign keys to `users.id`              |
+| A ticket has one of three known statuses                | `CHECK` on `tickets.status`                                                                                                            |
+| Who may read or change a ticket                         | not the database: `src/server/tickets/policy.ts` decides, see [permissions.md](permissions.md)                                         |
+| The permanent `ADMIN` account is protected              | triggers from migration `0001_protect_admin_account` (below) plus `assertNotProtectedAccount` in `src/server/users/account-service.ts` |
+| Accounts are never hard-deleted by the application      | soft delete through `users.deleted_at`; foreign keys from sessions and history keep pointing at a real row                             |
 
 ### Notes
 

@@ -286,8 +286,8 @@ describe('parseDiagram (guards the guard)', () => {
     ],
     [
       'a stage added to the CHECK without the diagram',
+      'CHECK: INITIAL_PASSWORD_CHANGE, PASSWORD_EXPIRED, TOTP_CHALLENGE, FULLY_AUTHENTICATED',
       'CHECK: INITIAL_PASSWORD_CHANGE, PASSWORD_EXPIRED, FULLY_AUTHENTICATED',
-      'CHECK: INITIAL_PASSWORD_CHANGE, PASSWORD_EXPIRED',
       'sessions.auth_stage',
     ],
     [

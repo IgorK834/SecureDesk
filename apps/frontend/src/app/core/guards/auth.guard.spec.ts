@@ -49,4 +49,19 @@ describe('authGuard', () => {
       );
     });
   });
+
+  describe('a session waiting for its second factor', () => {
+    const me = meResponse('EMPLOYEE', 'TOTP_CHALLENGE');
+
+    it.each(['/dashboard', '/tickets', '/account/change-password'])(
+      'is forced from %s to /totp-challenge',
+      async (url) => {
+        await expect(runGuard(authGuard, { me, url })).resolves.toBe('/totp-challenge');
+      },
+    );
+
+    it('may stay on /totp-challenge', async () => {
+      await expect(runGuard(authGuard, { me, url: '/totp-challenge' })).resolves.toBe(true);
+    });
+  });
 });

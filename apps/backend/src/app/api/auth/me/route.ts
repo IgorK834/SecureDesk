@@ -26,6 +26,7 @@ export const GET = defineRoute({
         user: toProfile(user),
         authStage: session.authStage,
         mustChangePassword: user.mustChangePassword,
+        totpEnabled: user.totpEnabled,
         permissions,
         passwordPolicy: { minPasswordLength, rejectPersonalDataInPassword },
       },

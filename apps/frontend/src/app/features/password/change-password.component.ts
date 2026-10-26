@@ -184,7 +184,9 @@ export class ChangePasswordComponent implements OnDestroy {
           this.form.reset();
           this.submitting.set(false);
           this.successMessage.set('Password changed successfully.');
-          void this.router.navigateByUrl('/dashboard');
+          void this.router.navigateByUrl(
+            response.authStage === 'TOTP_CHALLENGE' ? '/totp-challenge' : '/dashboard',
+          );
         },
         error: (error: unknown) => this.handleFailure(error),
       });

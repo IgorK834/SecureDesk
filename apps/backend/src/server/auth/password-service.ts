@@ -43,9 +43,9 @@ export interface ChangeInitialPasswordInput {
 
 export interface PasswordChangeResult {
   user: Profile;
-  authStage: 'FULLY_AUTHENTICATED';
+  authStage: 'FULLY_AUTHENTICATED' | 'TOTP_CHALLENGE';
   /** The only copy of the new token: for the cookie, never to be stored or logged. */
-  session: { token: string; expiresAt: Date };
+  session: { id: string; token: string; expiresAt: Date };
 }
 
 const notSignedIn = () => new ApiError(401, 'AUTH_REQUIRED', 'Wymagane zalogowanie');
@@ -146,11 +146,19 @@ export function rememberPasswordHash(
     .run();
 }
 
+function nextStage(user: UserRow): PasswordChangeResult['authStage'] {
+  return user.totpEnabledAt ? 'TOTP_CHALLENGE' : 'FULLY_AUTHENTICATED';
+}
+
 function toResult(user: UserRow, created: CreatedSession): PasswordChangeResult {
   return {
     user: toProfile(user),
-    authStage: 'FULLY_AUTHENTICATED',
-    session: { token: created.token, expiresAt: created.session.expiresAt },
+    authStage: nextStage(user),
+    session: {
+      id: created.session.id,
+      token: created.token,
+      expiresAt: created.session.expiresAt,
+    },
   };
 }
 
@@ -171,8 +179,6 @@ export async function changePassword(
   const user = loadActiveUser(db, session.userId);
 
   if (!(await verifyPassword(user.passwordHash, input.currentPassword))) {
-    // TODO(Task 6.1): count this failure in the rate limiter, keyed by user id. The placeholder
-    // `loginRateLimiter` only has `check(clientKey, normalizedLogin)` and cannot record one.
     throw new ApiError(400, 'CURRENT_PASSWORD_INCORRECT', 'Obecne hasło jest niepoprawne');
   }
   assertConfirmed(input);
@@ -198,7 +204,7 @@ export async function changePassword(
       if (!user.mustChangePassword) rememberPasswordHash(tx, user.id, user.passwordHash);
 
       revokeAllForUser(tx, user.id);
-      return createSession(tx, user.id, 'FULLY_AUTHENTICATED');
+      return createSession(tx, user.id, nextStage(user));
     },
     { behavior: 'immediate' },
   );
@@ -260,7 +266,7 @@ export async function changeInitialPassword(
       if (changes === 0) throw alreadyCompleted();
 
       revokeAllForUser(tx, user.id);
-      return createSession(tx, user.id, 'FULLY_AUTHENTICATED');
+      return createSession(tx, user.id, nextStage(user));
     },
     { behavior: 'immediate' },
   );

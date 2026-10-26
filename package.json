@@ -16,7 +16,10 @@
     "typecheck": "npm run typecheck --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run --coverage",
+    "test": "npm run check:sec-traceability && npm run check:image-locations && vitest run --coverage",
+    "test:e2e": "playwright test",
+    "check:sec-traceability": "node --experimental-strip-types scripts/check-sec-traceability.ts",
+    "check:image-locations": "node --experimental-strip-types scripts/check-image-locations.ts",
     "db:generate": "npm run db:generate -w apps/backend",
     "db:migrate": "npm run db:migrate -w apps/backend",
     "db:migrate:test": "npm run db:migrate:test -w apps/backend",
@@ -31,6 +34,8 @@
     }
   },
   "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.12.0",
+    "@playwright/test": "^1.64.1",
     "@vitest/coverage-v8": "^5.0.5",
     "concurrently": "^10.0.6",
     "eslint": "^10.13.0",

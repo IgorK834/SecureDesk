@@ -60,7 +60,7 @@ const REFUSED = [
   { who: 'a Guest', login: 'guest1' },
 ] as const;
 
-describe.each(targets)('$label', ({ route, method, module }) => {
+describe.each(targets)('$label (SEC-15, SEC-16)', ({ route, method, module }) => {
   const { url, params } = callable(route);
   // A body-carrying call is sent with valid JSON, so a refusal can only come from authorization.
   const options = {
@@ -108,6 +108,7 @@ describe('the admin routes the matrix covers', () => {
         'POST /api/admin/users/[id]/block',
         'POST /api/admin/users/[id]/unblock',
         'POST /api/admin/users/[id]/reset-password',
+        'POST /api/admin/users/[id]/reset-totp',
         'GET /api/admin/security-settings',
         'PATCH /api/admin/security-settings',
       ].sort(),

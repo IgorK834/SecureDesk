@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 
 // Secure unless COOKIE_SECURE is explicitly "false" (plain-HTTP local development), so a missing
 // or mistyped variable in a deployment fails safe instead of sending the session cookie in clear.
-function secureCookies(): boolean {
+export function secureCookies(): boolean {
   return process.env.COOKIE_SECURE !== 'false';
 }
 

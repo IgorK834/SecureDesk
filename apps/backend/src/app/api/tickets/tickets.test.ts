@@ -153,7 +153,7 @@ describe('GET /api/tickets/[id]: every role against every ticket', () => {
   });
 
   // SEC-17: a guest must not be able to tell "not yours" from "does not exist".
-  it('answers a ticket the caller may not read exactly like one that does not exist', async () => {
+  it('SEC-17: answers a ticket the caller may not read exactly like one that does not exist', async () => {
     const guest = asUser('guest1');
 
     const someoneElses = await fingerprint(await apiGet(guest, idOf(B)));
@@ -500,7 +500,7 @@ describe('POST /api/tickets', () => {
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
     });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(415);
     expect(rows()).toEqual(before);
   });
 });

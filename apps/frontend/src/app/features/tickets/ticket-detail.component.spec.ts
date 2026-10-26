@@ -53,7 +53,7 @@ function setup(role: Role, ticket: Ticket = baseTicket, answer: Observable<Ticke
 }
 
 describe('TicketDetailComponent', () => {
-  it('renders title and description as literal text and never executes markup', () => {
+  it('SEC-26: renders title and description as literal text and never executes markup', () => {
     const { root } = setup('MANAGER');
 
     expect(root.querySelector('h1')?.textContent).toBe(HOSTILE);

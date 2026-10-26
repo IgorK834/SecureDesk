@@ -245,9 +245,13 @@ describe('PATCH /api/admin/security-settings: what it changes', () => {
 
 describe('PATCH /api/admin/security-settings: what it refuses', () => {
   // The refusal is the same whatever was wrong, and the settings are exactly as they were.
-  const refused = async (response: Response) => {
-    expect(response.status).toBe(400);
-    expect(await response.text()).toBe(INVALID);
+  const refused = async (response: Response, status = 400) => {
+    expect(response.status).toBe(status);
+    expect(await response.text()).toBe(
+      status === 415
+        ? '{"error":{"code":"UNSUPPORTED_MEDIA_TYPE","message":"Wymagany Content-Type application/json"}}'
+        : INVALID,
+    );
   };
 
   it.each([
@@ -300,14 +304,16 @@ describe('PATCH /api/admin/security-settings: what it refuses', () => {
         body: 'minPasswordLength=16',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
       }),
+      415,
     );
     await refused(
       await admin.patch(settingsRoute, '/api/admin/security-settings', {
         body: '{"minPasswordLength":16}',
         headers: { 'content-type': 'text/plain' },
       }),
+      415,
     );
-    await refused(await admin.patch(settingsRoute, '/api/admin/security-settings'));
+    await refused(await admin.patch(settingsRoute, '/api/admin/security-settings'), 415);
 
     expect(storedRow()).toStrictEqual(before);
   });
@@ -472,7 +478,7 @@ describe('the minimum password length (minPasswordLength)', () => {
   });
 });
 
-describe('the idle timeout (sessionIdleTimeoutMinutes)', () => {
+describe('the idle timeout (sessionIdleTimeoutMinutes, SEC-23)', () => {
   it('lowering it expires a session that is already open, on its next request', async () => {
     const employee = asUser('employee1'); // opened at T0, idle limit 15 minutes
     fakeClock.advance(10 * MINUTE_MS);

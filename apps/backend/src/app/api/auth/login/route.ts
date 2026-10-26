@@ -1,11 +1,13 @@
-import { type NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { readSessionToken, sessionCookie } from '../../../../server/auth/cookie';
 import { authenticate } from '../../../../server/auth/login-service';
 import { db } from '../../../../server/db/client';
 import { errorResponse } from '../../../../server/http/errors';
 import { defineRoute } from '../../../../server/http/route-handler';
+import { csrfCookie } from '../../../../server/security/csrf';
 import { logEvent } from '../../../../server/security/log-event';
+import { getClientIp } from '../../../../server/security/rate-limiter';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,16 +18,6 @@ const LoginBody = z
     password: z.string().min(1).max(1024), // never trim or normalize the password
   })
   .strict();
-
-// The client address is only known through a proxy header, which is trustworthy only when a
-// proxy we control sets it (TRUST_PROXY=true). Task 6.1 may refine this.
-function clientKeyOf(request: NextRequest): string {
-  if (process.env.TRUST_PROXY === 'true') {
-    const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-    if (forwardedFor) return forwardedFor;
-  }
-  return 'unknown';
-}
 
 // Public by necessity (there is no session yet) and on the conformance test's allowlist. The body
 // is JSON-only: the wrapper refuses any other Content-Type, because a cross-site HTML form can
@@ -38,7 +30,7 @@ export const POST = defineRoute({
   handler: async ({ request, requestId, body }) => {
     const result = await authenticate(body, {
       db,
-      clientKey: clientKeyOf(request),
+      clientKey: getClientIp(request),
       presentedSessionToken: readSessionToken(request),
     });
 
@@ -54,13 +46,14 @@ export const POST = defineRoute({
           { headers: { 'Cache-Control': 'no-store' } },
         );
         response.cookies.set(sessionCookie(result.session.token, result.session.expiresAt));
+        response.cookies.set(csrfCookie(result.session.id, result.session.expiresAt));
         return response;
       }
       case 'rate_limited':
         logEvent('auth.login.rate_limited', requestId);
         return errorResponse(
           429,
-          'AUTH_RATE_LIMITED',
+          'RATE_LIMITED',
           'Zbyt wiele prób logowania. Spróbuj ponownie później',
           { 'Retry-After': String(result.retryAfterSeconds) },
         );

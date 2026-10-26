@@ -9,7 +9,10 @@ import { insertUser } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
 import { sessions, users } from '../../../../server/db/schema';
 import { seedDatabase } from '../../../../server/db/seeds';
-import { loginRateLimiter } from '../../../../server/security/login-rate-limiter';
+import {
+  loginRateLimiter,
+  resetLoginRateLimiterForTests,
+} from '../../../../server/security/login-rate-limiter';
 import { POST, dynamic, runtime } from './route';
 
 // These tests drive the real route handler against the real database wiring (an in-memory test
@@ -58,7 +61,11 @@ function post(body: unknown, headers: Record<string, string> = {}) {
   return POST(
     new NextRequest('http://localhost:3000/api/auth/login', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
+      headers: {
+        'content-type': 'application/json',
+        origin: 'http://localhost:3000',
+        ...headers,
+      },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
   );
@@ -90,19 +97,25 @@ describe('POST /api/auth/login: success', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
-  it('sets exactly one cookie: HttpOnly, Secure, SameSite=Lax, Path=/, host-only', async () => {
+  it('sets a protected session cookie and the Angular-readable XSRF cookie', async () => {
     addUser();
 
     const response = await loginAs('employee1');
 
     const cookies = response.headers.getSetCookie();
-    expect(cookies).toHaveLength(1);
-    const attributes = (cookies[0] ?? '').split(';').map((part) => part.trim().toLowerCase());
+    expect(cookies).toHaveLength(2);
+    const sessionCookie = cookies.find((cookie) => cookie.startsWith(`${COOKIE}=`)) ?? '';
+    const xsrfCookie = cookies.find((cookie) => cookie.startsWith('XSRF-TOKEN=')) ?? '';
+    const attributes = sessionCookie.split(';').map((part) => part.trim().toLowerCase());
     expect(attributes).toEqual(
       expect.arrayContaining(['httponly', 'secure', 'samesite=lax', 'path=/']),
     );
     expect(attributes.some((a) => a.startsWith('domain'))).toBe(false);
-    expect(cookies[0]).toMatch(new RegExp(`^${COOKIE}=[A-Za-z0-9_-]{43};`));
+    expect(sessionCookie).toMatch(new RegExp(`^${COOKIE}=[A-Za-z0-9_-]{43};`));
+    expect(xsrfCookie).toMatch(/^XSRF-TOKEN=[A-Za-z0-9_-]{43};/);
+    const xsrfAttributes = xsrfCookie.split(';').map((part) => part.trim().toLowerCase());
+    expect(xsrfAttributes).toEqual(expect.arrayContaining(['secure', 'samesite=lax', 'path=/']));
+    expect(xsrfAttributes).not.toContain('httponly');
   });
 
   it('backs the cookie with a stored session that holds only the token digest', async () => {
@@ -216,7 +229,7 @@ describe('POST /api/auth/login: accounts created by the seed', () => {
   });
 });
 
-describe('POST /api/auth/login: failures reveal nothing', () => {
+describe('POST /api/auth/login: failures reveal nothing (SEC-01, SEC-02)', () => {
   async function refusals() {
     addUser({ login: 'wrongpass' });
     addUser({ login: 'blocked', isBlocked: true });
@@ -323,9 +336,12 @@ describe('POST /api/auth/login: malformed requests', () => {
       { 'content-type': contentType },
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(415);
     expect(await response.json()).toStrictEqual({
-      error: { code: 'VALIDATION_ERROR', message: 'Nieprawidłowe dane żądania' },
+      error: {
+        code: 'UNSUPPORTED_MEDIA_TYPE',
+        message: 'Wymagany Content-Type application/json',
+      },
     });
     expect(response.headers.getSetCookie()).toHaveLength(0);
     expect(check).not.toHaveBeenCalled();
@@ -346,6 +362,21 @@ describe('POST /api/auth/login: malformed requests', () => {
 
     expect(response.status).toBe(200);
   });
+
+  it.each([
+    ['a foreign Origin', { origin: 'https://evil.example' }],
+    ['no Origin or Referer', { origin: '' }],
+  ])('refuses login CSRF from %s before looking up the account', async (_, headers) => {
+    const check = vi.spyOn(loginRateLimiter, 'check');
+    addUser();
+
+    const response = await post({ login: 'employee1', password: PASSWORD }, headers);
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.code).toBe('CSRF_ORIGIN_MISMATCH');
+    expect(check).not.toHaveBeenCalled();
+    expect(db.select().from(sessions).all()).toHaveLength(0);
+  });
 });
 
 describe('POST /api/auth/login: rate limiting hook', () => {
@@ -362,7 +393,7 @@ describe('POST /api/auth/login: rate limiting hook', () => {
     expect(response.headers.get('Retry-After')).toBe('42');
     expect(await response.json()).toStrictEqual({
       error: {
-        code: 'AUTH_RATE_LIMITED',
+        code: 'RATE_LIMITED',
         message: 'Zbyt wiele prób logowania. Spróbuj ponownie później',
       },
     });
@@ -385,6 +416,31 @@ describe('POST /api/auth/login: rate limiting hook', () => {
       ['unknown', 'employee1'],
       ['unknown', 'employee1'],
     ]);
+  });
+
+  it('SEC-27: the sixth failure per IP and submitted login is the same 429 for an existing and unknown login', async () => {
+    addUser();
+
+    const sixthResponse = async (login: string) => {
+      const responses: Response[] = [];
+      for (let attempt = 0; attempt < 6; attempt++) {
+        responses.push(await loginAs(login, 'definitely-not-the-password'));
+      }
+      expect(responses.slice(0, 5).map((response) => response.status)).toStrictEqual([
+        401, 401, 401, 401, 401,
+      ]);
+      return responses[5] as Response;
+    };
+
+    const existing = await sixthResponse('employee1');
+    resetLoginRateLimiterForTests();
+    const unknown = await sixthResponse('does-not-exist');
+
+    expect(existing.status).toBe(429);
+    expect(unknown.status).toBe(429);
+    expect(existing.headers.get('Retry-After')).toBe('900');
+    expect(unknown.headers.get('Retry-After')).toBe('900');
+    expect(await existing.text()).toBe(await unknown.text());
   });
 });
 

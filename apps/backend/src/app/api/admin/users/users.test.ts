@@ -18,6 +18,10 @@ import { db } from '../../../../server/db/client';
 import {
   type AuthStage,
   passwordHistory,
+  permissions,
+  rolePermissions,
+  roles,
+  securitySettings,
   sessions,
   tickets,
   users,
@@ -86,9 +90,9 @@ const tokens = new WeakMap<ApiClient, string>();
 const asUser = (login?: string, stage: AuthStage = 'FULLY_AUTHENTICATED'): ApiClient => {
   const client = createApiClient();
   if (login) {
-    const token = signInAs(db, ids[login] as string, stage);
-    tokens.set(client, token);
-    client.signIn(token);
+    const session = signInAs(db, ids[login] as string, stage);
+    tokens.set(client, session.token);
+    client.signIn(session);
   }
   return client;
 };
@@ -545,9 +549,14 @@ describe('POST /api/admin/users: what is created', () => {
     expect(row?.passwordHash).toMatch(/^\$argon2id\$/);
     expect(await verifyPassword(row?.passwordHash as string, temporaryPassword.value)).toBe(true);
     // The plaintext is in no column of any table.
-    for (const table of ['users', 'sessions', 'password_history', 'tickets']) {
-      const dump = JSON.stringify(db.all(sql.raw(`SELECT * FROM ${table}`)));
-      expect(dump).not.toContain(temporaryPassword.value);
+    for (const dump of [
+      db.select().from(users).all(),
+      db.select().from(sessions).all(),
+      db.select().from(passwordHistory).all(),
+      db.select().from(tickets).all(),
+    ]) {
+      const serialized = JSON.stringify(dump);
+      expect(serialized).not.toContain(temporaryPassword.value);
     }
   });
 
@@ -1733,14 +1742,20 @@ describe('POST /api/admin/users/[id]/reset-password (SEC-20): the plaintext goes
     expect(raw.split(secret)).toHaveLength(2); // exactly once in the body
     expect([...response.headers.values()].some((value) => value.includes(secret))).toBe(false);
     expect(output.lines().some((line) => line.includes(secret))).toBe(false);
-    // Every table, whatever it is called today: a column added later cannot start leaking it.
-    const tables = db.all<{ name: string }>(
-      sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
-    );
-    expect(tables.length).toBeGreaterThan(5);
-    for (const { name } of tables) {
-      const dump = JSON.stringify(db.all(sql.raw(`SELECT * FROM "${name}"`)));
-      expect(dump.includes(secret), `table ${name}`).toBe(false);
+    // Every application table is checked without dynamically constructing SQL identifiers.
+    const tableDumps = [
+      ['users', db.select().from(users).all()],
+      ['sessions', db.select().from(sessions).all()],
+      ['password_history', db.select().from(passwordHistory).all()],
+      ['tickets', db.select().from(tickets).all()],
+      ['roles', db.select().from(roles).all()],
+      ['permissions', db.select().from(permissions).all()],
+      ['role_permissions', db.select().from(rolePermissions).all()],
+      ['security_settings', db.select().from(securitySettings).all()],
+    ] as const;
+    expect(tableDumps).toHaveLength(8);
+    for (const [name, rows] of tableDumps) {
+      expect(JSON.stringify(rows).includes(secret), `table ${name}`).toBe(false);
     }
   });
 
@@ -1861,7 +1876,7 @@ describe('POST /api/admin/users/[id]/reset-password (SEC-20): what it refuses', 
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
     });
 
-    expect([bodiless.status, form.status]).toStrictEqual([400, 400]);
+    expect([bodiless.status, form.status]).toStrictEqual([415, 415]);
     expect(snapshot(ids.employee1 as string)).toStrictEqual(before);
   });
 });

@@ -4,6 +4,7 @@ import { sessionCookie } from '../../../../server/auth/cookie';
 import { changeInitialPassword } from '../../../../server/auth/password-service';
 import { db } from '../../../../server/db/client';
 import { defineRoute } from '../../../../server/http/route-handler';
+import { csrfCookie } from '../../../../server/security/csrf';
 import { logEvent } from '../../../../server/security/log-event';
 
 export const runtime = 'nodejs';
@@ -27,9 +28,6 @@ const ChangeInitialPasswordBody = z
  * permission: the stage is the authorization. On success every session of the user is revoked
  * and a new fully authenticated one is returned in the cookie.
  *
- * NOTE: a state-changing request normally also needs CSRF protection. That mechanism is owned
- * by SD-27 and does not exist yet; SameSite=Lax on the cookie and the JSON-only body are the
- * only defenses until then.
  */
 export const POST = defineRoute({
   name: 'auth.change_initial_password',
@@ -44,6 +42,7 @@ export const POST = defineRoute({
       { headers: { 'Cache-Control': 'no-store' } },
     );
     response.cookies.set(sessionCookie(result.session.token, result.session.expiresAt));
+    response.cookies.set(csrfCookie(result.session.id, result.session.expiresAt));
     return response;
   },
 });

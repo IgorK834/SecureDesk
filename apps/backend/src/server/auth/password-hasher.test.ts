@@ -40,7 +40,7 @@ describe('ARGON2_OPTIONS', () => {
   });
 });
 
-describe('hashPassword', () => {
+describe('hashPassword (SEC-03)', () => {
   it('produces an Argon2id v19 hash that records exactly m=19456, t=2, p=1', async () => {
     const { algorithm, version, params } = parsePhc(await hashPassword(PASSWORD));
 

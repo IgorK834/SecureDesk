@@ -4,6 +4,7 @@ import { revokeSession } from '../../../../server/auth/session-service';
 import { db } from '../../../../server/db/client';
 import { AUTH_STAGES } from '../../../../server/db/schema';
 import { defineRoute } from '../../../../server/http/route-handler';
+import { clearedCsrfCookie } from '../../../../server/security/csrf';
 import { logEvent } from '../../../../server/security/log-event';
 
 export const runtime = 'nodejs';
@@ -14,8 +15,6 @@ export const dynamic = 'force-dynamic';
  * and cleared in the browser. Open to every stage, so a user who must change the password can
  * still sign out. It needs no permission: every signed-in user may sign out.
  *
- * NOTE: a state-changing request normally also needs CSRF protection. That mechanism is owned
- * by SD-27 and does not exist yet; SameSite=Lax on the cookie is the only defense until then.
  */
 export const POST = defineRoute({
   name: 'auth.logout',
@@ -29,6 +28,7 @@ export const POST = defineRoute({
       headers: { 'Cache-Control': 'no-store' },
     });
     response.cookies.set(clearedSessionCookie());
+    response.cookies.set(clearedCsrfCookie());
     return response;
   },
 });

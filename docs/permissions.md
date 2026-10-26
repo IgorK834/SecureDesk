@@ -5,7 +5,7 @@ truth**; this document reproduces it for the report.
 
 | What                    | Where (under `apps/backend/src/server/`)                             |
 | ----------------------- | -------------------------------------------------------------------- |
-| The 15 permission codes | `permissions/codes.ts`                                               |
+| The 16 permission codes | `permissions/codes.ts`                                               |
 | Who holds which code    | `permissions/matrix.ts` (`ROLE_PERMISSIONS`), reviewed like any code |
 | Loading it into the DB  | `db/seeds/rbac.ts` (`seedRbac`)                                      |
 | Route-level check       | `http/route-handler.ts` (`defineRoute`), `permissions/authorize.ts`  |
@@ -28,20 +28,21 @@ A test (`permissions/permissions-doc.test.ts`) fails if the per-code table below
 The self-designed role and permission matrix of the project (backlog section 5), following the
 principle of least privilege:
 
-| Action                                 | Administrator | Manager | Employee | Guest |
-| -------------------------------------- | ------------- | ------- | -------- | ----- |
-| List/read user accounts                | Yes           | No      | No       | No    |
-| Create/edit/block/delete user accounts | Yes           | No      | No       | No    |
-| Reset another user's password          | Yes           | No      | No       | No    |
-| Read/change global security settings   | Yes           | No      | No       | No    |
-| Change own regular password            | Yes           | Yes     | Yes      | Yes   |
-| Create a ticket                        | No            | Yes     | Yes      | Yes   |
-| Read all tickets                       | No            | Yes     | No       | No    |
-| Read tickets assigned to self          | No            | Yes     | Yes      | No    |
-| Read tickets created by self           | No            | Yes     | Yes      | Yes   |
-| Assign a ticket to an employee         | No            | Yes     | No       | No    |
-| Update status of any ticket            | No            | Yes     | No       | No    |
-| Update status of an assigned ticket    | No            | Yes     | Yes      | No    |
+| Action                                   | Administrator | Manager | Employee | Guest |
+| ---------------------------------------- | ------------- | ------- | -------- | ----- |
+| List/read user accounts                  | Yes           | No      | No       | No    |
+| Create/edit/block/delete user accounts   | Yes           | No      | No       | No    |
+| Reset another user's password            | Yes           | No      | No       | No    |
+| Reset another user's TOTP after ID check | Yes           | No      | No       | No    |
+| Read/change global security settings     | Yes           | No      | No       | No    |
+| Change own regular password              | Yes           | Yes     | Yes      | Yes   |
+| Create a ticket                          | No            | Yes     | Yes      | Yes   |
+| Read all tickets                         | No            | Yes     | No       | No    |
+| Read tickets assigned to self            | No            | Yes     | Yes      | No    |
+| Read tickets created by self             | No            | Yes     | Yes      | Yes   |
+| Assign a ticket to an employee           | No            | Yes     | No       | No    |
+| Update status of any ticket              | No            | Yes     | No       | No    |
+| Update status of an assigned ticket      | No            | Yes     | Yes      | No    |
 
 **Changing one's own password is not a permission code.** Every signed-in user may do it, and only
 for their own account (`POST /api/auth/change-password`, which also asks for the current password),
@@ -61,6 +62,7 @@ replaces the ownership check.
 | `users:block`                    | Yes           | No      | No       | No    | none                                    |
 | `users:delete`                   | Yes           | No      | No       | No    | none                                    |
 | `users:reset-password`           | Yes           | No      | No       | No    | none                                    |
+| `users:reset-totp`               | Yes           | No      | No       | No    | out-of-band identity check required     |
 | `security-settings:read`         | Yes           | No      | No       | No    | none                                    |
 | `security-settings:update`       | Yes           | No      | No       | No    | none                                    |
 | `tickets:create`                 | No            | Yes     | Yes      | Yes   | none: the creator is always the caller  |

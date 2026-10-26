@@ -27,6 +27,8 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
           } else if (stage === 'PASSWORD_EXPIRED') {
             void router.navigateByUrl('/account/change-password');
           }
+        } else if (status === 403 && code === 'AUTH_TOTP_REQUIRED') {
+          void router.navigateByUrl('/totp-challenge');
         } else if (status === 403) {
           void router.navigateByUrl('/forbidden');
         }

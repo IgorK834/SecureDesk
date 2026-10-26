@@ -21,6 +21,7 @@ describe('MainNav', () => {
     expect(links).toStrictEqual([
       '/dashboard',
       '/account/change-password',
+      '/account/two-factor-authentication',
       '/admin/users',
       '/admin/security',
     ]);
@@ -35,6 +36,7 @@ describe('MainNav', () => {
       expect(links).toStrictEqual([
         '/dashboard',
         '/account/change-password',
+        '/account/two-factor-authentication',
         '/tickets',
         '/tickets/new',
       ]);

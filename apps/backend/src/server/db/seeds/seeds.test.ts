@@ -78,7 +78,7 @@ describe('seedDatabase on an empty database', () => {
     }
   });
 
-  it('creates the 15 permissions and links them to roles exactly as the matrix says', async () => {
+  it('creates the 16 permissions and links them to roles exactly as the matrix says', async () => {
     await seedDatabase(db);
 
     expect(
@@ -98,7 +98,7 @@ describe('seedDatabase on an empty database', () => {
       codes.map((code) => `${roleId}|${code}`),
     );
     expect(linked.sort()).toEqual(expected.sort());
-    expect(linked).toHaveLength(21);
+    expect(linked).toHaveLength(22);
   });
 
   it('creates the single settings row with the variant-2 defaults', async () => {

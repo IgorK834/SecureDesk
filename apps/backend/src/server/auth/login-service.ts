@@ -30,7 +30,7 @@ export type LoginResult =
       user: Profile;
       authStage: AuthStage;
       mustChangePassword: boolean;
-      session: { token: string; expiresAt: Date };
+      session: { id: string; token: string; expiresAt: Date };
     }
   // One outcome for every way credentials can be refused, so callers cannot tell them apart.
   | { outcome: 'invalid_credentials' }
@@ -49,14 +49,14 @@ function authStageFor(user: UserRow, db: AppDb, now: Date): AuthStage {
 
   // A missing settings row means the defaults: password expiry disabled.
   const { passwordMaxAgeDays: maxAgeDays } = readSecuritySettings(db);
-  if (maxAgeDays === null) return 'FULLY_AUTHENTICATED';
+  if (maxAgeDays === null) return user.totpEnabledAt ? 'TOTP_CHALLENGE' : 'FULLY_AUTHENTICATED';
 
   // No recorded change date while expiry is on cannot be proven fresh, so it counts as expired.
   const changedAt = user.passwordChangedAt;
   if (changedAt === null || now.getTime() - changedAt.getTime() > maxAgeDays * DAY_MS) {
     return 'PASSWORD_EXPIRED';
   }
-  return 'FULLY_AUTHENTICATED';
+  return user.totpEnabledAt ? 'TOTP_CHALLENGE' : 'FULLY_AUTHENTICATED';
 }
 
 /**
@@ -88,12 +88,16 @@ export async function authenticate(input: LoginInput, ctx: LoginContext): Promis
     user ? user.passwordHash : dummyHash,
     input.password,
   );
-  if (!user || !passwordMatches || user.isBlocked) return INVALID_CREDENTIALS;
+  if (!user || !passwordMatches || user.isBlocked) {
+    loginRateLimiter.recordFailure(ctx.clientKey, normalizedLogin);
+    return INVALID_CREDENTIALS;
+  }
 
   const now = clock.now();
   // A NULL expiry means "no deadline" (the seeded ADMIN's bootstrap password).
   const expiry = user.temporaryPasswordExpiresAt;
   if (user.mustChangePassword && expiry !== null && isTemporaryPasswordExpired(expiry, now)) {
+    loginRateLimiter.recordFailure(ctx.clientKey, normalizedLogin);
     return INVALID_CREDENTIALS;
   }
 
@@ -110,6 +114,10 @@ export async function authenticate(input: LoginInput, ctx: LoginContext): Promis
     user: toProfile(user),
     authStage,
     mustChangePassword: user.mustChangePassword,
-    session: { token: created.token, expiresAt: created.session.expiresAt },
+    session: {
+      id: created.session.id,
+      token: created.token,
+      expiresAt: created.session.expiresAt,
+    },
   };
 }

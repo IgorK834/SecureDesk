@@ -7,6 +7,7 @@ import { users } from './users';
 export const AUTH_STAGES = [
   'INITIAL_PASSWORD_CHANGE',
   'PASSWORD_EXPIRED',
+  'TOTP_CHALLENGE',
   'FULLY_AUTHENTICATED',
 ] as const;
 
@@ -43,8 +44,7 @@ export const sessions = sqliteTable(
     index('sessions_last_activity_at_idx').on(t.lastActivityAt),
     check(
       'sessions_auth_stage_check',
-      // The values are the constants above, never user input, so sql.raw is safe here.
-      sql`${t.authStage} IN (${sql.raw(AUTH_STAGES.map((stage) => `'${stage}'`).join(', '))})`,
+      sql`${t.authStage} IN ('INITIAL_PASSWORD_CHANGE', 'PASSWORD_EXPIRED', 'TOTP_CHALLENGE', 'FULLY_AUTHENTICATED')`,
     ),
   ],
 );

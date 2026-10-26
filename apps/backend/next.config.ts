@@ -15,6 +15,24 @@ const nextConfig: NextConfig = {
   agentRules: false,
   // Native modules must be required at runtime, not bundled.
   serverExternalPackages: ['better-sqlite3', 'argon2'],
+  async headers() {
+    return [
+      {
+        source: '/api/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'no-store' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
+          {
+            key: 'Content-Security-Policy',
+            value: "default-src 'none'; frame-ancestors 'none'",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

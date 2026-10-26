@@ -1,5 +1,6 @@
 /** The server-side session stage reported by `GET /api/auth/me`. */
-export type AuthStage = 'INITIAL_PASSWORD_CHANGE' | 'PASSWORD_EXPIRED' | 'FULLY_AUTHENTICATED';
+export type AuthStage =
+  'INITIAL_PASSWORD_CHANGE' | 'PASSWORD_EXPIRED' | 'TOTP_CHALLENGE' | 'FULLY_AUTHENTICATED';
 
 /** Role codes exactly as the server sends them (upper-case). */
 export type Role = 'ADMINISTRATOR' | 'MANAGER' | 'EMPLOYEE' | 'GUEST';
@@ -16,6 +17,7 @@ export const PERMISSION_CODES = [
   'users:block',
   'users:delete',
   'users:reset-password',
+  'users:reset-totp',
   'security-settings:read',
   'security-settings:update',
   'tickets:create',
@@ -56,6 +58,7 @@ export interface MeResponse {
   user: SessionUser;
   authStage: AuthStage;
   mustChangePassword: boolean;
+  totpEnabled: boolean;
   /** Plain strings: a code this client does not know simply never matches. */
   permissions: string[];
   /** Also sent while a password change is still owed, when no other endpoint can be read. */
@@ -72,5 +75,5 @@ export interface LoginResponse {
 /** A successful password change always creates a fresh, fully authenticated session. */
 export interface PasswordChangeResponse {
   user: SessionUser;
-  authStage: 'FULLY_AUTHENTICATED';
+  authStage: 'FULLY_AUTHENTICATED' | 'TOTP_CHALLENGE';
 }

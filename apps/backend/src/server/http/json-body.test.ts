@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { parseJsonBody } from './json-body';
+import { parseJsonBody, readJsonBody } from './json-body';
 import { ApiError } from './errors';
 
 const Schema = z.object({ name: z.string() }).strict();
@@ -43,7 +43,7 @@ describe('parseJsonBody', () => {
   ])('refuses a valid body sent as %s', async (_, contentType) => {
     const error = await refusal(post('{"name":"x"}', contentType));
 
-    expect([error.status, error.code]).toStrictEqual([400, 'VALIDATION_ERROR']);
+    expect([error.status, error.code]).toStrictEqual([415, 'UNSUPPORTED_MEDIA_TYPE']);
   });
 
   it.each([
@@ -74,5 +74,16 @@ describe('parseJsonBody', () => {
     const error = await refusal(request);
 
     expect([error.status, error.code]).toStrictEqual([400, 'VALIDATION_ERROR']);
+  });
+});
+
+describe('readJsonBody size cap (SEC-25)', () => {
+  it('returns 413 for a 20 KiB JSON request before parsing it', async () => {
+    const request = post(JSON.stringify({ value: 'x'.repeat(20 * 1024) }));
+
+    await expect(readJsonBody(request, { maxBytes: 16_384 })).rejects.toMatchObject({
+      status: 413,
+      code: 'PAYLOAD_TOO_LARGE',
+    });
   });
 });

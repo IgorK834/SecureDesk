@@ -14,6 +14,7 @@ import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-tes
 import { insertUser } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
 import { type AuthStage, sessions } from '../../../../server/db/schema';
+import { csrfTokenForSession } from '../../../../server/security/csrf';
 import { GET as me } from '../me/route';
 import { POST, dynamic, runtime } from './route';
 
@@ -36,11 +37,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const requestFor = (path: string, method: string, token?: string) =>
-  new NextRequest(`http://localhost:3000${path}`, {
+const requestFor = (path: string, method: string, token?: string) => {
+  const session = token
+    ? db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.tokenHash, hashSessionToken(token)))
+        .get()
+    : undefined;
+  return new NextRequest(`http://localhost:3000${path}`, {
     method,
-    headers: token === undefined ? {} : { cookie: `${sessionCookieName()}=${token}` },
+    headers: {
+      ...(method === 'POST' ? { origin: 'http://localhost:3000' } : {}),
+      ...(token === undefined ? {} : { cookie: `${sessionCookieName()}=${token}` }),
+      ...(method === 'POST' && session ? { 'x-xsrf-token': csrfTokenForSession(session.id) } : {}),
+    },
   });
+};
 const logout = (token?: string) => POST(requestFor('/api/auth/logout', 'POST', token));
 const whoAmI = (token: string) => me(requestFor('/api/auth/me', 'GET', token));
 
@@ -85,13 +98,21 @@ describe('POST /api/auth/logout', () => {
     const response = await logout(token);
 
     const cookies = response.headers.getSetCookie();
-    expect(cookies).toHaveLength(1);
-    const attributes = (cookies[0] ?? '').split(';').map((part) => part.trim().toLowerCase());
+    expect(cookies).toHaveLength(2);
+    const sessionCookie = cookies.find((cookie) => cookie.startsWith('__Host-sd_session=')) ?? '';
+    const xsrfCookie = cookies.find((cookie) => cookie.startsWith('XSRF-TOKEN=')) ?? '';
+    const attributes = sessionCookie.split(';').map((part) => part.trim().toLowerCase());
     expect(attributes[0]).toBe('__host-sd_session=');
     expect(attributes).toEqual(
       expect.arrayContaining(['max-age=0', 'httponly', 'secure', 'samesite=lax', 'path=/']),
     );
     expect(attributes.some((a) => a.startsWith('domain'))).toBe(false);
+    const xsrfAttributes = xsrfCookie.split(';').map((part) => part.trim().toLowerCase());
+    expect(xsrfAttributes[0]).toBe('xsrf-token=');
+    expect(xsrfAttributes).toEqual(
+      expect.arrayContaining(['max-age=0', 'secure', 'samesite=lax', 'path=/']),
+    );
+    expect(xsrfAttributes).not.toContain('httponly');
   });
 
   it('ends only the caller’s session, not the same user’s other devices', async () => {

@@ -166,6 +166,7 @@ describe('no plaintext credentials can be stored', () => {
   // decides.
   const CREDENTIAL_COLUMNS = [
     'users.password_hash',
+    'users.totp_secret_encrypted',
     'password_history.password_hash',
     'sessions.token_hash',
   ];
@@ -173,6 +174,8 @@ describe('no plaintext credentials can be stored', () => {
     'users.must_change_password',
     'users.temporary_password_expires_at',
     'users.password_changed_at',
+    'users.totp_enabled_at',
+    'users.totp_last_used_step',
     'security_settings.min_password_length',
     'security_settings.reject_personal_data_in_password',
     'security_settings.password_max_age_days',
@@ -242,12 +245,12 @@ describe('no plaintext credentials can be stored', () => {
     expect(CREDENTIAL_NAME.test(name)).toBe(false);
   });
 
-  it('stores every credential as text in a `*_hash` column', () => {
+  it('stores every credential as text in an explicitly hash-or-encrypted column', () => {
     for (const qualified of CREDENTIAL_COLUMNS) {
       const [table, column] = qualified.split('.') as [string, string];
       const info = db.$client.pragma(`table_info(${table})`) as { name: string; type: string }[];
 
-      expect(column).toMatch(/_hash$/);
+      expect(column).toMatch(/(?:_hash|_encrypted)$/);
       expect(info.find((candidate) => candidate.name === column)?.type.toLowerCase()).toBe('text');
     }
   });

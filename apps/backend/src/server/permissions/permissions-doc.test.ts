@@ -47,6 +47,6 @@ describe('docs/permissions.md', () => {
 
   it('would notice a row that is not parsed instead of passing on nothing', () => {
     expect(documentedGrants('no table here').size).toBe(0);
-    expect(documented.size).toBe(15);
+    expect(documented.size).toBe(16);
   });
 });
