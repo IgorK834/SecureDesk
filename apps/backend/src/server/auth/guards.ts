@@ -1,7 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { db } from '../db/client';
 import type { AuthStage } from '../db/schema';
-import { ForbiddenError, PasswordChangeRequiredError, UnauthorizedError } from '../http/errors';
+import {
+  ForbiddenError,
+  PasswordChangeRequiredError,
+  TotpChallengeRequiredError,
+  UnauthorizedError,
+} from '../http/errors';
 import { requirePermission } from '../permissions/authorize';
 import type { PermissionCode } from '../permissions/codes';
 import { readSessionToken } from './cookie';
@@ -39,6 +44,7 @@ export function requireStage(
 
   const { authStage } = resolved.session;
   if (!stages.includes(authStage)) {
+    if (authStage === 'TOTP_CHALLENGE') throw new TotpChallengeRequiredError();
     throw RESTRICTED_STAGES.includes(authStage)
       ? new PasswordChangeRequiredError()
       : new ForbiddenError();

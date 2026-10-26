@@ -41,6 +41,13 @@ export class PasswordChangeRequiredError extends ApiError {
   }
 }
 
+/** 403: the password was accepted, but the second authentication factor is still required. */
+export class TotpChallengeRequiredError extends ApiError {
+  constructor() {
+    super(403, 'AUTH_TOTP_REQUIRED', 'Wymagany kod uwierzytelniania dwuskładnikowego');
+  }
+}
+
 /** 400: malformed input. Never says what was wrong, so it cannot echo what the client sent. */
 export class ValidationError extends ApiError {
   constructor(details?: Record<string, unknown>) {

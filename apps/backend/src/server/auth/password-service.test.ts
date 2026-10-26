@@ -217,12 +217,14 @@ describe('changePassword', () => {
     expect(hashPassword).not.toHaveBeenCalled();
   });
 
-  it('does not overwrite a password that was replaced while this request was hashing', async () => {
+  it('a simultaneous administrator reset and password change leave exactly the reset credential active', async () => {
     const { session } = open();
     let reissued: string | undefined;
+    let reissuedPlaintext: string | undefined;
     vi.mocked(hashPassword).mockImplementationOnce(async (plain) => {
       const credential = await issueTemporaryCredential();
       reissued = credential.hash;
+      reissuedPlaintext = credential.plaintext;
       db.transaction((tx) => applyTemporaryCredential(tx, userId, credential));
       return actualHash(plain);
     });
@@ -231,6 +233,9 @@ describe('changePassword', () => {
 
     expect([error.status, error.code]).toStrictEqual([409, 'PASSWORD_CHANGE_ALREADY_COMPLETED']);
     expect(userRow()?.passwordHash).toBe(reissued);
+    expect(await verifyPassword(reissued ?? '', reissuedPlaintext ?? '')).toBe(true);
+    expect(await verifyPassword(reissued ?? '', NEW_PASSWORD)).toBe(false);
+    expect(await verifyPassword(reissued ?? '', P[7] as string)).toBe(false);
     expect(historyOf()).toStrictEqual([]);
     expect(
       db.select().from(sessions).where(eq(sessions.id, session.id)).get()?.revokedAt,

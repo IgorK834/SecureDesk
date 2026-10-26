@@ -59,7 +59,7 @@ function attempt(login: string, password: string = PASSWORD, extra: { token?: st
 
 const sessionRows = () => db.select().from(sessions).all();
 
-describe('refused logins', () => {
+describe('refused logins (SEC-01, SEC-02)', () => {
   // Each way credentials can fail must be indistinguishable from the others, by result and by
   // cost: this is what stops the endpoint from being used to find out which accounts exist.
   const refusals: [string, () => { login: string; password: string }][] = [
@@ -181,7 +181,7 @@ describe('a valid login', () => {
       user: { id, login: 'employee1', firstName: 'Jan', lastName: 'Kowalski', role: 'EMPLOYEE' },
       authStage: 'FULLY_AUTHENTICATED',
       mustChangePassword: false,
-      session: { token: expect.any(String), expiresAt: expect.any(Date) },
+      session: { id: expect.any(String), token: expect.any(String), expiresAt: expect.any(Date) },
     });
     expect(vi.mocked(verifyPassword)).toHaveBeenCalledTimes(1);
   });
