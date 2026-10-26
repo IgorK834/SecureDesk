@@ -80,4 +80,14 @@ describe('authInterceptor', () => {
 
     expect(router.navigateByUrl).toHaveBeenCalledWith('/forbidden');
   });
+
+  it('sends a second-factor refusal to the TOTP challenge instead of Forbidden', () => {
+    const { client, http, router } = setup('TOTP_CHALLENGE');
+    client.get('/api/private').subscribe({ error: () => undefined });
+    http
+      .expectOne('/api/private')
+      .flush({ error: { code: 'AUTH_TOTP_REQUIRED' } }, { status: 403, statusText: 'Forbidden' });
+
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/totp-challenge');
+  });
 });

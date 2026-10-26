@@ -50,8 +50,10 @@ export class LoginComponent {
             ? '/change-initial-password'
             : response.authStage === 'PASSWORD_EXPIRED'
               ? '/account/change-password'
-              : acceptedReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl')) ||
-                '/dashboard';
+              : response.authStage === 'TOTP_CHALLENGE'
+                ? '/totp-challenge'
+                : acceptedReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl')) ||
+                  '/dashboard';
         const finish = () => {
           this.submitting.set(false);
           void this.router.navigateByUrl(destination);

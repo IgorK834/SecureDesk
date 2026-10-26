@@ -4,11 +4,11 @@ import { firstValueFrom } from 'rxjs';
 import { ApiClient } from '../http/api-client.service';
 import type { AuthStage, MeResponse, PasswordPolicy, Permission, SessionUser } from './auth.models';
 
-type Session = Pick<MeResponse, 'user' | 'authStage' | 'permissions'> & {
+type Session = Pick<MeResponse, 'user' | 'authStage' | 'permissions' | 'totpEnabled'> & {
   passwordPolicy: PasswordPolicy | null;
 };
 type SessionUpdate = Pick<MeResponse, 'user' | 'authStage'> &
-  Partial<Pick<MeResponse, 'permissions' | 'passwordPolicy'>>;
+  Partial<Pick<MeResponse, 'permissions' | 'passwordPolicy' | 'totpEnabled'>>;
 
 /**
  * The signed-in user as the SERVER sees them. The state lives only in memory and is rebuilt from
@@ -31,6 +31,7 @@ export class AuthService {
   readonly passwordPolicy = computed<PasswordPolicy | null>(
     () => this.session()?.passwordPolicy ?? null,
   );
+  readonly totpEnabled = computed(() => this.session()?.totpEnabled ?? false);
   /** True once the first `load()` has finished, whatever its outcome. */
   readonly loaded = this.settled.asReadonly();
 
@@ -73,7 +74,19 @@ export class AuthService {
       authStage: update.authStage,
       permissions: update.permissions ?? (sameUser ? current.permissions : []),
       passwordPolicy: update.passwordPolicy ?? (sameUser ? current.passwordPolicy : null),
+      totpEnabled:
+        'totpEnabled' in update
+          ? Boolean(update.totpEnabled)
+          : sameUser
+            ? current.totpEnabled
+            : false,
     });
+  }
+
+  /** Updates only the local status after this tab successfully enables or disables TOTP. */
+  setTotpEnabled(enabled: boolean): void {
+    const current = this.session();
+    if (current) this.session.set({ ...current, totpEnabled: enabled });
   }
 
   /**

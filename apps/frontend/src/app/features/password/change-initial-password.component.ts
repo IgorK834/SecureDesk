@@ -135,7 +135,9 @@ export class ChangeInitialPasswordComponent implements OnDestroy {
           this.auth.setSession(response);
           this.form.reset();
           this.submitting.set(false);
-          void this.router.navigateByUrl('/dashboard');
+          void this.router.navigateByUrl(
+            response.authStage === 'TOTP_CHALLENGE' ? '/totp-challenge' : '/dashboard',
+          );
         },
         error: (error: unknown) => this.handleFailure(error),
       });

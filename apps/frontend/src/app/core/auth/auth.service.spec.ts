@@ -28,6 +28,7 @@ describe('AuthService.load()', () => {
     expect(auth.authStage()).toBeNull();
     expect(auth.permissions()).toStrictEqual([]);
     expect(auth.passwordPolicy()).toBeNull();
+    expect(auth.totpEnabled()).toBe(false);
     expect(auth.loaded()).toBe(false);
   });
 
@@ -41,6 +42,7 @@ describe('AuthService.load()', () => {
     expect(auth.authStage()).toBe('FULLY_AUTHENTICATED');
     expect(auth.permissions()).toStrictEqual(me.permissions);
     expect(auth.passwordPolicy()).toStrictEqual(me.passwordPolicy);
+    expect(auth.totpEnabled()).toBe(false);
     expect(auth.loaded()).toBe(true);
   });
 
@@ -194,5 +196,15 @@ describe('AuthService.setSession()', () => {
     expect(auth.user()).toStrictEqual(next.user);
     expect(auth.permissions()).toStrictEqual([]);
     expect(auth.passwordPolicy()).toBeNull();
+  });
+
+  it('updates the local TOTP status without storing any secret', async () => {
+    const auth = signedInAs(meResponse('EMPLOYEE'));
+    await auth.load();
+
+    auth.setTotpEnabled(true);
+    expect(auth.totpEnabled()).toBe(true);
+    auth.setTotpEnabled(false);
+    expect(auth.totpEnabled()).toBe(false);
   });
 });

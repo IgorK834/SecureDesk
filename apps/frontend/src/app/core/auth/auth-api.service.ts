@@ -17,6 +17,14 @@ export interface ChangePasswordRequest extends ChangeInitialPasswordRequest {
   currentPassword: string;
 }
 
+export interface TotpCodeRequest {
+  code: string;
+}
+
+export interface DisableTotpRequest extends TotpCodeRequest {
+  currentPassword: string;
+}
+
 /** Typed, same-origin client for the authentication operations used by the three auth forms. */
 @Injectable({ providedIn: 'root' })
 export class AuthApiService {
@@ -32,6 +40,22 @@ export class AuthApiService {
 
   changePassword(body: ChangePasswordRequest): Observable<PasswordChangeResponse> {
     return this.http.post<PasswordChangeResponse>('/api/auth/change-password', body);
+  }
+
+  enrollTotp(): Observable<{ otpauthUri: string }> {
+    return this.http.post<{ otpauthUri: string }>('/api/auth/totp/enroll', {});
+  }
+
+  verifyTotpEnrollment(body: TotpCodeRequest): Observable<void> {
+    return this.http.post<void>('/api/auth/totp/verify-enrollment', body);
+  }
+
+  completeTotpChallenge(body: TotpCodeRequest): Observable<PasswordChangeResponse> {
+    return this.http.post<PasswordChangeResponse>('/api/auth/totp/challenge', body);
+  }
+
+  disableTotp(body: DisableTotpRequest): Observable<void> {
+    return this.http.post<void>('/api/auth/totp/disable', body);
   }
 
   logout(): Observable<void> {

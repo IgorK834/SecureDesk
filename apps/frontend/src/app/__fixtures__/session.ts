@@ -27,6 +27,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'users:block',
     'users:delete',
     'users:reset-password',
+    'users:reset-totp',
     'security-settings:read',
     'security-settings:update',
   ],
@@ -57,6 +58,7 @@ export function meResponse(
     user: { id: `id-${role}`, login: role.toLowerCase(), firstName: 'Ann', lastName: 'Test', role },
     authStage,
     mustChangePassword: authStage === 'INITIAL_PASSWORD_CHANGE',
+    totpEnabled: false,
     permissions: [...permissions],
     passwordPolicy: { minPasswordLength: 12, rejectPersonalDataInPassword: false },
   };

@@ -4,6 +4,7 @@ import { authGuard } from './core/guards/auth.guard';
 import { guestOnlyGuard } from './core/guards/guest-only.guard';
 import { initialChangeGuard } from './core/guards/initial-change.guard';
 import { type PermissionRouteData, permissionGuard } from './core/guards/permission.guard';
+import { totpChallengeGuard } from './core/guards/totp-challenge.guard';
 
 // The page inventory of backlog section 11.1. Every route except /login sits behind `authGuard`
 // (so a session that owes a password change is sent to that page from everywhere, including
@@ -36,6 +37,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'totp-challenge',
+    title: 'Two-factor authentication',
+    canActivate: [authGuard, totpChallengeGuard],
+    loadComponent: () =>
+      import('./features/totp/totp-challenge.component').then((m) => m.TotpChallengeComponent),
+  },
+  {
     path: 'dashboard',
     title: 'Dashboard',
     canActivate: [authGuard],
@@ -49,6 +57,13 @@ export const routes: Routes = [
       import('./features/password/change-password.component').then(
         (m) => m.ChangePasswordComponent,
       ),
+  },
+  {
+    path: 'account/two-factor-authentication',
+    title: 'Two-factor authentication',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./features/totp/totp-settings.component').then((m) => m.TotpSettingsComponent),
   },
   {
     path: 'admin/users',
