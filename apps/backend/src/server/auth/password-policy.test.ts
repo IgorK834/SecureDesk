@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { POLICY_FIXTURE_USER } from '../../../../../tests/helpers/user-fixtures';
 import { BANNED_PASSWORDS } from './banned-passwords';
 import {
   MAX_PASSWORD_LENGTH,
@@ -12,18 +13,20 @@ const OFF: PasswordPolicySettings = { minPasswordLength: 12, rejectPersonalDataI
 const ON: PasswordPolicySettings = { ...OFF, rejectPersonalDataInPassword: true };
 
 // Three distinct values, so each assertion shows exactly which one matched.
-const USER: PolicySubject = { login: 'jdoe42', firstName: 'Anna', lastName: 'Kowalska' };
+const USER: PolicySubject = POLICY_FIXTURE_USER;
 
 const emoji = (count: number) => '\u{1F600}'.repeat(count);
 
 describe('length (SEC-09, SEC-10)', () => {
-  it('rejects an 11-character password and accepts the 12-character boundary', () => {
-    expect(validateNewPassword('qpwoeirutya', USER, OFF)).toStrictEqual(['TOO_SHORT']);
-    expect(validateNewPassword('qpwoeirutyal', USER, OFF)).toStrictEqual([]);
-  });
-
-  it('rejects the empty password', () => {
-    expect(validateNewPassword('', USER, OFF)).toStrictEqual(['TOO_SHORT']);
+  it.each([
+    [0, ['TOO_SHORT']],
+    [11, ['TOO_SHORT']],
+    [12, []],
+    [13, []],
+    [128, []],
+    [129, ['TOO_LONG']],
+  ])('applies the policy at the explicit %i-character boundary', (length, violations) => {
+    expect(validateNewPassword('q'.repeat(length), USER, OFF)).toStrictEqual(violations);
   });
 
   it('lets the administrator raise the minimum above 12', () => {
@@ -42,11 +45,8 @@ describe('length (SEC-09, SEC-10)', () => {
     ).toStrictEqual(['TOO_SHORT']);
   });
 
-  it('accepts up to 128 characters and rejects 129', () => {
+  it('pins the maximum at 128 characters', () => {
     expect(MAX_PASSWORD_LENGTH).toBe(128);
-
-    expect(validateNewPassword('a'.repeat(128), USER, OFF)).toStrictEqual([]);
-    expect(validateNewPassword('a'.repeat(129), USER, OFF)).toStrictEqual(['TOO_LONG']);
   });
 });
 
@@ -91,22 +91,18 @@ describe('no composition rules for user-chosen passwords', () => {
 });
 
 describe('personal-data rule enabled (SEC-11)', () => {
-  it('rejects a password containing the first name in a different case', () => {
-    expect(validateNewPassword('MyANNApassword2026!', USER, ON)).toStrictEqual([
-      'CONTAINS_FIRST_NAME',
-    ]);
-  });
-
-  it('rejects a password containing the login in upper case', () => {
-    expect(validateNewPassword('xx-JDOE42-secret-2026', USER, ON)).toStrictEqual([
-      'CONTAINS_LOGIN',
-    ]);
-  });
-
-  it('rejects a password containing the last name in mixed case', () => {
-    expect(validateNewPassword('my-KoWaLsKa-password', USER, ON)).toStrictEqual([
-      'CONTAINS_LAST_NAME',
-    ]);
+  it.each([
+    ['login in lower case', 'before-jkowalski-after', 'CONTAINS_LOGIN'],
+    ['login in upper case', 'before-JKOWALSKI-after', 'CONTAINS_LOGIN'],
+    ['login in mixed case', 'before-JkOwAlSkI-after', 'CONTAINS_LOGIN'],
+    ['first name in lower case', 'before-anna-after', 'CONTAINS_FIRST_NAME'],
+    ['first name in upper case', 'before-ANNA-after', 'CONTAINS_FIRST_NAME'],
+    ['first name in mixed case', 'before-AnNa-after', 'CONTAINS_FIRST_NAME'],
+    ['last name in lower case', 'before-nowak-zielinska-after', 'CONTAINS_LAST_NAME'],
+    ['last name in upper case', 'before-NOWAK-ZIELINSKA-after', 'CONTAINS_LAST_NAME'],
+    ['last name in mixed case', 'before-NoWaK-ZiElInSkA-after', 'CONTAINS_LAST_NAME'],
+  ])('rejects the %s', (_, password, violation) => {
+    expect(validateNewPassword(password, USER, ON)).toStrictEqual([violation]);
   });
 
   it('reports every rule that is broken, in a fixed order', () => {
@@ -114,7 +110,7 @@ describe('personal-data rule enabled (SEC-11)', () => {
       'TOO_SHORT',
       'CONTAINS_FIRST_NAME',
     ]);
-    expect(validateNewPassword('kowalska-anna-jdoe42-2026', USER, ON)).toStrictEqual([
+    expect(validateNewPassword('nowak-zielinska-anna-jkowalski-2026', USER, ON)).toStrictEqual([
       'CONTAINS_LOGIN',
       'CONTAINS_FIRST_NAME',
       'CONTAINS_LAST_NAME',
@@ -122,9 +118,11 @@ describe('personal-data rule enabled (SEC-11)', () => {
   });
 
   it('reports only codes, never the profile data itself', () => {
-    const result = JSON.stringify(validateNewPassword('kowalska-anna-jdoe42-2026', USER, ON));
+    const result = JSON.stringify(
+      validateNewPassword('nowak-zielinska-anna-jkowalski-2026', USER, ON),
+    );
 
-    expect(result).not.toMatch(/kowalska|anna|jdoe/i);
+    expect(result).not.toMatch(/nowak|zielinska|anna|jkowalski/i);
   });
 
   it('accepts a password that contains none of them', () => {
@@ -169,15 +167,19 @@ describe('personal-data rule enabled (SEC-11)', () => {
   describe('values that must never match', () => {
     // `includes('')` is always true: without the guard every password would be rejected.
     it.each([
-      ['empty first and last name', { login: 'jdoe42', firstName: '', lastName: '' }],
-      ['an empty login', { login: '', firstName: 'Anna', lastName: 'Kowalska' }],
-      ['whitespace-only names', { login: 'jdoe42', firstName: '   ', lastName: '\t' }],
+      ['empty first and last name', { login: 'jkowalski', firstName: '', lastName: '' }],
+      ['an empty login', { login: '', firstName: 'Anna', lastName: 'Nowak-Zielinska' }],
+      ['whitespace-only names', { login: 'jkowalski', firstName: '   ', lastName: '\t' }],
     ])('causes no false positive for %s', (_, subject) => {
       expect(validateNewPassword('correct horse battery staple', subject, ON)).toStrictEqual([]);
     });
 
     it('still matches a name stored with stray surrounding spaces', () => {
-      const padded: PolicySubject = { login: 'jdoe42', firstName: ' Anna ', lastName: 'Kowalska' };
+      const padded: PolicySubject = {
+        login: 'jkowalski',
+        firstName: ' Anna ',
+        lastName: 'Nowak-Zielinska',
+      };
 
       expect(validateNewPassword('MyANNApassword2026!', padded, ON)).toStrictEqual([
         'CONTAINS_FIRST_NAME',
@@ -187,7 +189,7 @@ describe('personal-data rule enabled (SEC-11)', () => {
 });
 
 describe('personal-data rule disabled (SEC-12)', () => {
-  it.each(['MyANNApassword2026!', 'xx-JDOE42-secret-2026', 'my-KoWaLsKa-password'])(
+  it.each(['MyANNApassword2026!', 'xx-JKOWALSKI-secret-2026', 'my-NoWaK-ZiElInSkA-password'])(
     'does not reject %s for containing profile data',
     (password) => {
       expect(validateNewPassword(password, USER, OFF)).toStrictEqual([]);
