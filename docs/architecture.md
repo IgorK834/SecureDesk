@@ -78,7 +78,8 @@ preflight and could otherwise sign a victim into the attacker's account (login C
 
 1. The body is validated (strict schema; the login is trimmed and at most 64 characters, the
    password is at most 1024 characters and is **never** trimmed or normalized).
-2. The rate-limit hook is asked about the client and the normalized login.
+2. The per-process sliding-window limiter counts the client address (30 attempts per 15 minutes)
+   and checks the address plus normalized submitted login (5 failures per 15 minutes).
 3. The account is looked up by normalized login, ignoring soft-deleted accounts.
 4. **Exactly one** Argon2id verification happens, against the stored hash or, for an unknown
    login, against `getDummyHash()`, so response time does not show whether the login exists.
@@ -88,7 +89,7 @@ preflight and could otherwise sign a victim into the attacker's account (login C
    password all give the same result.
 6. The session stage is chosen: `INITIAL_PASSWORD_CHANGE` while `must_change_password` is set,
    otherwise `PASSWORD_EXPIRED` if `password_max_age_days` is set and exceeded, otherwise
-   `FULLY_AUTHENTICATED`.
+   `TOTP_CHALLENGE` when TOTP is enabled, or `FULLY_AUTHENTICATED` when no second factor is due.
 7. A brand-new session is created; a session cookie the request already carried is revoked in the
    same transaction (prevents session fixation).
 
@@ -102,25 +103,45 @@ no `password_changed_at`, it counts as expired.
 | Status | `error.code`               | When                                                               |
 | ------ | -------------------------- | ------------------------------------------------------------------ |
 | 200    | (none)                     | Valid credentials; sets the session cookie                         |
-| 400    | `VALIDATION_ERROR`         | Not JSON, wrong type, missing/extra/oversized field                |
+| 400    | `VALIDATION_ERROR`         | Invalid JSON, wrong type, or a missing/extra/oversized field       |
 | 401    | `AUTH_INVALID_CREDENTIALS` | Every credential failure; byte-identical body and headers          |
-| 413    | `PAYLOAD_TOO_LARGE`        | The body is over 64 KiB                                            |
-| 429    | `AUTH_RATE_LIMITED`        | The rate-limit hook refused the attempt (`Retry-After` is sent)    |
+| 413    | `PAYLOAD_TOO_LARGE`        | The body is over 16,384 bytes                                      |
+| 415    | `UNSUPPORTED_MEDIA_TYPE`   | The media type is not `application/json`                           |
+| 429    | `RATE_LIMITED`             | A login window is exhausted (`Retry-After` is sent)                |
 | 500    | `INTERNAL_ERROR`           | Anything unexpected; nothing about the cause is returned or logged |
 
 Every response is `Cache-Control: no-store`. Logging is limited to an event name and a request id
 (`server/security/log-event.ts`, filtered by `redact.ts`); request bodies, passwords, hashes,
 tokens and error messages (which can embed query parameters) are never logged.
 
-### Provisional parts
+### Login throttling
 
-These exist so login works end to end and are to be replaced or confirmed by later tasks:
+`server/security/login-rate-limiter.ts` uses two sliding windows. The address-wide window admits
+30 attempts in 15 minutes. The address-plus-normalized-login window admits five failed attempts;
+the sixth is refused even when the submitted login does not name an account. It is checked before
+the account lookup and records the submitted string for every credential failure, so the status,
+body and `Retry-After` do not disclose account existence. A successful login does not consume the
+failure window. Separating the second key by address prevents one remote address from locking a
+victim out everywhere.
 
-| Part                | Current stand-in                                                    | Owner    |
-| ------------------- | ------------------------------------------------------------------- | -------- |
-| Rate limiter        | `loginRateLimiter` allows everything                                | Task 6.1 |
-| Rate-limiter client | first `X-Forwarded-For` entry if `TRUST_PROXY=true`, else `unknown` | Task 6.1 |
-| CSRF protection     | none yet (a slot in `defineRoute`); relies on SameSite=Lax          | SD-27    |
+The first `X-Forwarded-For` value is trusted only when `TRUST_PROXY=true`; otherwise a
+client-supplied forwarding header is ignored. The store is an in-memory `Map`, so it is
+**per-process and lost on restart**. A horizontally scaled or restart-resilient deployment must
+replace it with a shared, atomic store such as Redis.
+
+## CSRF protection
+
+SameSite is defence in depth, not the CSRF protocol. On login and every session rotation the
+server sets `XSRF-TOKEN = base64url(HMAC-SHA256(CSRF_SECRET, session.id))`, with `Secure`,
+`SameSite=Lax` and `Path=/`. It is deliberately not HttpOnly: Angular reads it and sends the value
+as `X-XSRF-TOKEN`. The session cookie remains HttpOnly and is never exposed to Angular.
+
+For every `POST`, `PUT`, `PATCH` and `DELETE`, `defineRoute` requires `Origin` (or the `Referer`
+origin as a fallback) to equal `APP_ORIGIN`. An authenticated request must also carry the correct
+session-bound XSRF header; comparison uses `crypto.timingSafeEqual`. These checks run after
+authentication and authorization but before session activity is recorded or a handler runs. The
+public login route has no session-bound token yet, so it requires the same-origin check and a JSON
+media type; a cross-origin simple HTML form cannot drive it.
 
 ## Sessions
 
@@ -185,21 +206,21 @@ export const GET = defineRoute({
 
 A request stops at the first step that refuses it:
 
-| #   | Step             | Refusal                                                                                         |
-| --- | ---------------- | ----------------------------------------------------------------------------------------------- |
-| 1   | Headers          | `413` if the declared `Content-Length` is over 64 KiB; `400` if a route with a body is not JSON |
-| 2   | Session          | `401 AUTH_REQUIRED`                                                                             |
-| 3   | Stage            | `403 AUTH_PASSWORD_CHANGE_REQUIRED` or `AUTH_FORBIDDEN`                                         |
-| 4   | Permission       | `403 AUTH_FORBIDDEN`                                                                            |
-| 5   | CSRF check       | reserved for Task 6.1, so a refused request cannot extend a session                             |
-| 6   | Session activity | none: the idle timer restarts only now, for an admitted request                                 |
-| 7   | Validation       | `400 VALIDATION_ERROR` for params, query and body (strict Zod schemas)                          |
-| 8   | Handler          | whatever it returns, or throws                                                                  |
-| 9   | Error mapping    | an `ApiError` becomes its envelope; anything else becomes a generic `500`                       |
+| #   | Step             | Refusal                                                                       |
+| --- | ---------------- | ----------------------------------------------------------------------------- |
+| 1   | Headers          | `413` above 16,384 bytes; `415` if a route with a body is not JSON            |
+| 2   | Session          | `401 AUTH_REQUIRED`                                                           |
+| 3   | Stage            | `403 AUTH_PASSWORD_CHANGE_REQUIRED`, `AUTH_TOTP_REQUIRED` or `AUTH_FORBIDDEN` |
+| 4   | Permission       | `403 AUTH_FORBIDDEN`                                                          |
+| 5   | CSRF check       | `403 CSRF_ORIGIN_MISMATCH` or `CSRF_TOKEN_INVALID`                            |
+| 6   | Session activity | none: the idle timer restarts only now, for an admitted request               |
+| 7   | Validation       | `400 VALIDATION_ERROR` for params, query and body (strict Zod schemas)        |
+| 8   | Handler          | whatever it returns, or throws                                                |
+| 9   | Error mapping    | an `ApiError` becomes its envelope; anything else becomes a generic `500`     |
 
 - **Cheap checks first.** The headers are looked at before the database, so an oversized or
   mistyped request costs nothing. The body is read only after authorization, and in chunks: a
-  request without a `Content-Length` (chunked upload) is cut off at 64 KiB as well.
+  request without a `Content-Length` (chunked upload) is cut off at 16,384 bytes as well.
 - **Permissions are read on every request** (`resolveSession` joins `role_permissions`), so
   removing one from a role applies to the next request, without a new login. A code that is not in
   `PERMISSIONS` is never granted, even if a database row says so. A list of codes means _any of_.
@@ -223,12 +244,13 @@ the role's permissions. Its refusals:
 | ------ | ------------------------------- | ---------------------------------------------------------------------------------- |
 | 401    | `AUTH_REQUIRED`                 | No cookie, malformed, unknown, revoked or expired: one byte-identical body         |
 | 403    | `AUTH_PASSWORD_CHANGE_REQUIRED` | A session that still owes a password change calls anything not open to it          |
+| 403    | `AUTH_TOTP_REQUIRED`            | The password succeeded, but the TOTP challenge is not complete                     |
 | 403    | `AUTH_FORBIDDEN`                | The role lacks the permission, or a full session calls a restricted-stage endpoint |
 
 ### Endpoints
 
 - `GET /api/auth/me`: open to every stage. Returns `{ user, authStage, mustChangePassword,
-permissions, passwordPolicy }` (`user` is the same five fields as the login response).
+permissions, passwordPolicy, totpEnabled }` (`user` is the same five fields as the login response).
   `mustChangePassword` is the account flag, as in the login response; clients should decide from
   `authStage`, which also covers an expired password. `passwordPolicy` is `{ minPasswordLength,
 rejectPersonalDataInPassword }`, the current values from the security settings, read on every call.
@@ -247,6 +269,39 @@ session with a fresh token and a new stage in one transaction (use it when privi
 example after the forced password change). Login itself revokes a token the request already carried
 (session fixation).
 
+## Optional TOTP two-factor authentication
+
+TOTP is an extra-credit layer implemented with `otplib` 13.x; the application does not implement
+RFC 6238 itself. Enrollment generates a random Base32 secret and returns its `otpauth://` URI only
+from `POST /api/auth/totp/enroll`. Angular renders that URI as a QR code with `qrcode`, clears the
+QR and confirmation form on cancel, success and component destruction, and never puts the URI in a
+URL, router state, storage or a log.
+
+The database stores only an AES-256-GCM envelope in `users.totp_secret_encrypted`: version, random
+96-bit IV, authentication tag and ciphertext in base64url. `TOTP_ENCRYPTION_KEY` is an independent
+32-byte base64 environment secret. A missing or wrong-length key fails closed; tampering makes GCM
+authentication fail. The plaintext secret is decrypted only for verification and is never included
+in logs or responses after the enrollment response.
+
+Enrollment is enabled only after a valid six-digit confirmation. Login with a correct password for
+an enabled account creates a restricted `TOTP_CHALLENGE` session, not a full session. That stage may
+call only `/api/auth/me`, logout and `POST /api/auth/totp/challenge`; every other protected route
+returns `403 AUTH_TOTP_REQUIRED`. A valid code rotates the session to `FULLY_AUTHENTICATED`.
+Password changes also return to the challenge stage when TOTP is enabled, so rotating the password
+cannot bypass the second factor.
+
+Verification accepts the current 30-second step with at most one step of clock drift. The matched
+step is stored in `totp_last_used_step`, and `otplib` receives it as an exclusive lower bound;
+therefore an accepted code cannot be replayed even while its time window is still open. Five failed
+codes per restricted session are allowed in 15 minutes; the sixth receives `429`. This limiter is
+process-local, with the same scaling limitation as login throttling.
+
+Disabling TOTP requires both the current password and a fresh code. Administrator recovery uses the
+separate `users:reset-totp` permission, clears the encrypted secret and revokes every session of the
+target. The operator must complete an out-of-band proof-of-identity procedure described in the
+threat model before using it; possession of an administrator session alone is not treated as proof
+that the requester owns the target account.
+
 ## User administration
 
 `app/api/admin/users/**`, Administrator only. Every endpoint is `FULLY_AUTHENTICATED` plus one
@@ -262,6 +317,7 @@ permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `
 | `POST /api/admin/users/[id]/block`          | `users:block`          | `200` the account, also when it was already blocked                                  |
 | `POST /api/admin/users/[id]/unblock`        | `users:block`          | `200` the account, also when it was not blocked                                      |
 | `POST /api/admin/users/[id]/reset-password` | `users:reset-password` | `200 { temporaryPassword: { value, expiresAt } }` (`404` if missing or soft-deleted) |
+| `POST /api/admin/users/[id]/reset-totp`     | `users:reset-totp`     | `204`; clears TOTP and revokes the target's sessions after identity verification     |
 
 - **Strict allowlists both ways.** Responses are built by `toAdminUserDto` from named columns
   (the query never loads `password_hash`); request bodies and queries are strict Zod schemas
@@ -330,8 +386,8 @@ PROTECTED_ACCOUNT` (`assertNotProtectedAccount`). The service checks first so th
   These components use `@Input`, `@Output` and `@ViewChild`, not `input()`, `output()` and
   `viewChild()`: the root Vitest run that gates coverage has no Angular compiler plugin, and
   without it the initializer functions are not recognized.
-- **Not yet protected: CSRF.** These state-changing routes rely on `SameSite=Lax` on the session
-  cookie until SD-27 adds a CSRF check (see the note on `auth/logout`).
+- **Cross-site requests.** Every state-changing administrator route passes through the shared
+  origin and session-bound XSRF checks before any mutation or activity update.
 
 ## Temporary passwords (variant 2)
 
@@ -441,9 +497,9 @@ AUTH_TEMPORARY_PASSWORD_EXPIRED`.
 | 401    | `AUTH_TEMPORARY_PASSWORD_EXPIRED`   | `change-initial-password` after the 12-hour deadline; the session is revoked                                       |
 | 409    | `PASSWORD_CHANGE_ALREADY_COMPLETED` | the credential changed while the request was running                                                               |
 
-Both endpoints still need CSRF protection (SD-27, not built yet; see the table above). A wrong
-current password is not yet counted by a rate limiter: the placeholder limiter only knows login
-attempts (Task 6.1, marked `TODO` in `changePassword`).
+Both endpoints pass through the shared origin and session-bound XSRF checks. Login throttling is
+separate from current-password validation: password policy, history and the old credential remain
+authoritative server-side checks inside the password-change transaction.
 
 ## Security settings
 
@@ -496,5 +552,20 @@ session lifetime ends the session first.
   server stored. The server's `400` carries no field, so it is shown as one message for the whole
   form, not under a field. Someone who may read the settings but not update them sees the form
   disabled and no Save button.
-- **Not yet protected: CSRF.** `PATCH` relies on `SameSite=Lax` and on the JSON-only body until
-  SD-27 adds a CSRF check.
+- **CSRF.** `PATCH` uses the same origin and session-bound XSRF checks as every other
+  state-changing route.
+
+## HTTP response hardening and deployment
+
+Next.js applies these headers to every `/api/**` response: `Cache-Control: no-store`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+`Cross-Origin-Resource-Policy: same-origin`, and
+`Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`. The API emits no CORS
+headers, so a foreign-origin preflight is never granted.
+
+The separately served SPA should use a nonce- or hash-based policy tailored to its production
+assets, starting from `default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors
+'none'`, then adding only the exact script, style, font and connection sources it needs. Do not add
+`unsafe-eval`; avoid `unsafe-inline` by using nonces or hashes. At the HTTPS reverse proxy, send
+`Strict-Transport-Security: max-age=31536000; includeSubDomains` only after every covered subdomain
+is permanently HTTPS; add `preload` only after satisfying the browser preload requirements.
