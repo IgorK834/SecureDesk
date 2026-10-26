@@ -24,10 +24,37 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['tests/helpers/clean-env.ts'],
-    include: [
-      'apps/*/src/**/*.{test,spec}.ts',
-      'apps/*/scripts/**/*.{test,spec}.ts',
-      'tests/**/*.{test,spec}.ts',
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          include: [
+            'apps/backend/src/server/**/*.{test,spec}.ts',
+            'apps/frontend/src/**/*.{test,spec}.ts',
+            'apps/*/scripts/**/*.{test,spec}.ts',
+            'tests/**/*.{test,spec}.ts',
+          ],
+          exclude: [
+            'tests/integration/**',
+            'tests/admin-routes-authz.test.ts',
+            'tests/route-guard-conformance.test.ts',
+            'tests/e2e/**',
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'integration',
+          include: [
+            'apps/backend/src/app/api/**/*.{test,spec}.ts',
+            'tests/integration/**/*.{test,spec}.ts',
+            'tests/admin-routes-authz.test.ts',
+            'tests/route-guard-conformance.test.ts',
+          ],
+        },
+      },
     ],
     coverage: {
       provider: 'v8',

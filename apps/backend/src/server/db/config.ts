@@ -15,13 +15,14 @@ function pathsOverlap(segments: string[], wanted: string[]): boolean {
 }
 
 /**
- * Resolves the SQLite file for the current environment (TEST_DATABASE_PATH when
- * NODE_ENV=test, DATABASE_PATH otherwise) and refuses unsafe setups. Relative paths are
+ * Resolves the SQLite file for the current environment (TEST_DATABASE_PATH for unit tests,
+ * E2E_DATABASE_PATH for browser tests, DATABASE_PATH otherwise) and refuses unsafe setups. Relative paths are
  * resolved against the current working directory (apps/backend for every npm script).
  */
 export function resolveDbPath(env: NodeJS.ProcessEnv = process.env): string {
   const isTest = env.NODE_ENV === 'test';
-  const variable = isTest ? 'TEST_DATABASE_PATH' : 'DATABASE_PATH';
+  const isE2e = Boolean(env.E2E_DATABASE_PATH?.trim()) && !isTest;
+  const variable = isTest ? 'TEST_DATABASE_PATH' : isE2e ? 'E2E_DATABASE_PATH' : 'DATABASE_PATH';
   const raw = env[variable]?.trim();
 
   if (!raw) {
@@ -41,10 +42,16 @@ export function resolveDbPath(env: NodeJS.ProcessEnv = process.env): string {
 
   const resolved = path.resolve(raw);
 
-  const other = env[isTest ? 'DATABASE_PATH' : 'TEST_DATABASE_PATH']?.trim();
-  if (other && other !== MEMORY_DB && path.resolve(other) === resolved) {
+  const otherVariables = ['DATABASE_PATH', 'TEST_DATABASE_PATH', 'E2E_DATABASE_PATH'].filter(
+    (candidate) => candidate !== variable,
+  );
+  const overlap = otherVariables.find((candidate) => {
+    const other = env[candidate]?.trim();
+    return other && other !== MEMORY_DB && path.resolve(other) === resolved;
+  });
+  if (overlap) {
     throw new DbConfigError(
-      `DATABASE_PATH and TEST_DATABASE_PATH must be different files (both resolve to ${resolved}); tests would destroy development data.`,
+      `${variable} and ${overlap} must be different files (both resolve to ${resolved}); tests would destroy another environment's data.`,
     );
   }
 

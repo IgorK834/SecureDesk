@@ -11,6 +11,12 @@ describe('resolveDbPath: which file is used', () => {
     expect(path.isAbsolute(resolved)).toBe(true);
   });
 
+  it('uses the isolated E2E path when E2E_DATABASE_PATH is present outside unit tests', () => {
+    expect(
+      resolveDbPath({ NODE_ENV: 'development', E2E_DATABASE_PATH: '/srv/data/e2e.sqlite' }),
+    ).toBe('/srv/data/e2e.sqlite');
+  });
+
   it('uses TEST_DATABASE_PATH when NODE_ENV=test so tests can never open the dev file', () => {
     const resolved = resolveDbPath({
       NODE_ENV: 'test',
