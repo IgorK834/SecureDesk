@@ -8,6 +8,7 @@ import { ConflictError as DbConflictError } from '../db/errors';
 import type { AuthStage } from '../db/schema';
 import type { PermissionCode } from '../permissions/codes';
 import { logEvent } from '../security/log-event';
+import { assertCsrfProtection } from '../security/csrf';
 import { ApiError, ConflictError, ValidationError, errorResponse } from './errors';
 import { checkBodyHeaders, parseJsonBody } from './json-body';
 
@@ -116,7 +117,7 @@ function toResponse(name: string, requestId: string, error: unknown): Response {
  *  2. resolve the session (revoked, idle, expired, blocked or deleted all read as "no session")
  *  3. stage check: a session that owes a password change may call only what allows its stage
  *  4. permission check, read from the database on every request, never from the cookie
- *  5. CSRF check (Task 6.1 plugs in here, so a forged request never counts as activity)
+ *  5. same-origin and session-bound CSRF checks, before a forged request can count as activity
  *  6. record activity: the request is authenticated and authorized
  *  7. validate path parameters, query and JSON body with Zod
  *  8. the handler
@@ -143,7 +144,8 @@ export function defineRoute<
           ? undefined
           : requireStage(request, auth.stages, { permission: auth.permission });
 
-      // Task 6.1: the CSRF check goes here, after authorization and before activity is recorded.
+      // A forged request must be refused before it can count as session activity.
+      assertCsrfProtection(request, session?.session);
 
       if (session) touchSession(db, session.session.id);
 

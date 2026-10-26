@@ -1,6 +1,7 @@
 // Test fixture: the RBAC matrix plus the seed accounts, without the cost of hashing seven
 // passwords. Excluded from coverage (see __fixtures__).
 import { createSession } from '../../auth/session-service';
+import { csrfTokenForSession } from '../../security/csrf';
 import type { AuthStage } from '../schema';
 import type { AppDb } from '../connection';
 import { seedRbac } from '../seeds/rbac';
@@ -22,7 +23,11 @@ export function seedWorld(db: AppDb): Record<string, string> {
   );
 }
 
-/** Opens a session for the user and returns its raw token, as the cookie would carry it. */
+/** Opens a session and returns the two browser values needed by the API test client. */
 export function signInAs(db: AppDb, userId: string, stage: AuthStage = 'FULLY_AUTHENTICATED') {
-  return createSession(db, userId, stage).token;
+  const created = createSession(db, userId, stage);
+  return {
+    token: created.token,
+    csrfToken: csrfTokenForSession(created.session.id),
+  };
 }

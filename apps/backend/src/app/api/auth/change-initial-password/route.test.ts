@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeClock } from '../../../../../../../tests/helpers/fake-clock';
 import { sessionCookieName } from '../../../../server/auth/cookie';
 import { hashPassword, verifyPassword } from '../../../../server/auth/password-hasher';
-import { createSession, resolveSession } from '../../../../server/auth/session-service';
+import {
+  createSession,
+  hashSessionToken,
+  resolveSession,
+} from '../../../../server/auth/session-service';
 import {
   type TemporaryCredential,
   issueTemporaryCredential,
@@ -22,6 +26,7 @@ import {
 } from '../../../../server/db/schema';
 import { defineRoute } from '../../../../server/http/route-handler';
 import { PERMISSIONS } from '../../../../server/permissions/codes';
+import { csrfTokenForSession } from '../../../../server/security/csrf';
 import { POST as changePassword } from '../change-password/route';
 import { POST as login } from '../login/route';
 import { POST as logout } from '../logout/route';
@@ -82,6 +87,14 @@ afterEach(() => {
 
 const open = (stage: AuthStage = 'INITIAL_PASSWORD_CHANGE') => createSession(db, userId, stage);
 const cookieHeader = (token: string) => `${sessionCookieName()}=${token}`;
+const csrfFor = (token: string) => {
+  const session = db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.tokenHash, hashSessionToken(token)))
+    .get();
+  return session ? csrfTokenForSession(session.id) : undefined;
+};
 
 function post(
   handler: (request: NextRequest) => Promise<Response> | Response,
@@ -95,7 +108,11 @@ function post(
       method: 'POST',
       headers: {
         'content-type': 'application/json',
+        origin: 'http://localhost:3000',
         ...(token === undefined ? {} : { cookie: cookieHeader(token) }),
+        ...(token === undefined || csrfFor(token) === undefined
+          ? {}
+          : { 'x-xsrf-token': csrfFor(token) as string }),
         ...headers,
       },
       body: typeof body === 'string' ? body : JSON.stringify(body),
@@ -392,7 +409,7 @@ describe('POST /api/auth/change-initial-password: validation', () => {
 
       const response = await changeInitial(open().token, valid(), { 'content-type': contentType });
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(415);
       expect(credentials()).toStrictEqual(before);
     },
   );
@@ -419,9 +436,12 @@ describe('POST /api/auth/change-initial-password: success', () => {
     expect(text).not.toMatch(/hash|token|argon2|\$/i);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     const cookies = response.headers.getSetCookie();
-    expect(cookies).toHaveLength(1);
-    expect(cookies[0]).toMatch(new RegExp(`^${COOKIE}=[A-Za-z0-9_-]{43};`));
-    const attributes = (cookies[0] ?? '').split(';').map((part) => part.trim().toLowerCase());
+    expect(cookies).toHaveLength(2);
+    const sessionCookie = cookies.find((cookie) => cookie.startsWith(`${COOKIE}=`)) ?? '';
+    const xsrfCookie = cookies.find((cookie) => cookie.startsWith('XSRF-TOKEN=')) ?? '';
+    expect(sessionCookie).toMatch(new RegExp(`^${COOKIE}=[A-Za-z0-9_-]{43};`));
+    expect(xsrfCookie).toMatch(/^XSRF-TOKEN=[A-Za-z0-9_-]{43};/);
+    const attributes = sessionCookie.split(';').map((part) => part.trim().toLowerCase());
     expect(attributes).toEqual(
       expect.arrayContaining(['httponly', 'secure', 'samesite=lax', 'path=/']),
     );
@@ -603,6 +623,8 @@ describe('POST /api/auth/change-initial-password: all or nothing', () => {
     expect(row).toMatchObject({ mustChangePassword: false, temporaryPasswordExpiresAt: null });
     expect(liveSessions().map((s) => s.authStage)).toStrictEqual(['FULLY_AUTHENTICATED']);
     expect(db.select().from(passwordHistory).all()).toStrictEqual([]);
+    expect((await logIn(winner as string)).status).toBe(200);
+    expect((await logIn(loser as string)).status).toBe(401);
   });
 
   it('does not change the password again when the same request is repeated with the old cookie', async () => {

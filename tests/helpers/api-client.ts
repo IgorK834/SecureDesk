@@ -4,6 +4,7 @@
 // Angular and without starting a server.
 import { NextRequest } from 'next/server';
 import { sessionCookieName } from '../../apps/backend/src/server/auth/cookie';
+import { XSRF_COOKIE_NAME, XSRF_HEADER_NAME } from '../../apps/backend/src/server/security/csrf';
 
 export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
 
@@ -33,8 +34,10 @@ export class ApiClient {
   private readonly jar = new Map<string, string>();
 
   /** Signs in the way the app does: the session token travels only in the cookie. */
-  signIn(token: string): this {
+  signIn(session: string | { token: string; csrfToken: string }): this {
+    const token = typeof session === 'string' ? session : session.token;
     this.jar.set(sessionCookieName(), token);
+    if (typeof session !== 'string') this.jar.set(XSRF_COOKIE_NAME, session.csrfToken);
     return this;
   }
 
@@ -52,6 +55,12 @@ export class ApiClient {
     if (!handler) throw new Error(`The route module does not export ${method}.`);
 
     const headers = new Headers(options.headers);
+    const stateChanging = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+    if (stateChanging && !headers.has('origin')) headers.set('origin', ORIGIN);
+    const xsrfToken = this.jar.get(XSRF_COOKIE_NAME);
+    if (stateChanging && xsrfToken && !headers.has(XSRF_HEADER_NAME)) {
+      headers.set(XSRF_HEADER_NAME, xsrfToken);
+    }
     if (this.jar.size > 0) {
       headers.set('cookie', [...this.jar].map(([name, value]) => `${name}=${value}`).join('; '));
     }

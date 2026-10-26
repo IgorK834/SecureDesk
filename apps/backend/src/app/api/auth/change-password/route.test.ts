@@ -4,7 +4,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { FakeClock } from '../../../../../../../tests/helpers/fake-clock';
 import { sessionCookieName } from '../../../../server/auth/cookie';
 import { hashPassword, verifyPassword } from '../../../../server/auth/password-hasher';
-import { createSession, resolveSession } from '../../../../server/auth/session-service';
+import {
+  createSession,
+  hashSessionToken,
+  resolveSession,
+} from '../../../../server/auth/session-service';
 import { captureOutput } from '../../../../server/__fixtures__/capture-output';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
 import { insertUser } from '../../../../server/db/__fixtures__/test-db';
@@ -16,6 +20,7 @@ import {
   sessions,
   users,
 } from '../../../../server/db/schema';
+import { csrfTokenForSession } from '../../../../server/security/csrf';
 import { POST as login } from '../login/route';
 import { GET as me } from '../me/route';
 import { POST, dynamic, runtime } from './route';
@@ -77,6 +82,14 @@ afterEach(() => {
 
 const open = (stage: AuthStage = 'FULLY_AUTHENTICATED') => createSession(db, userId, stage);
 const cookieHeader = (token: string) => `${sessionCookieName()}=${token}`;
+const csrfFor = (token: string) => {
+  const session = db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.tokenHash, hashSessionToken(token)))
+    .get();
+  return session ? csrfTokenForSession(session.id) : undefined;
+};
 
 function change(token: string | undefined, body: unknown, headers: Record<string, string> = {}) {
   return POST(
@@ -84,7 +97,11 @@ function change(token: string | undefined, body: unknown, headers: Record<string
       method: 'POST',
       headers: {
         'content-type': 'application/json',
+        origin: 'http://localhost:3000',
         ...(token === undefined ? {} : { cookie: cookieHeader(token) }),
+        ...(token === undefined || csrfFor(token) === undefined
+          ? {}
+          : { 'x-xsrf-token': csrfFor(token) as string }),
         ...headers,
       },
       body: typeof body === 'string' ? body : JSON.stringify(body),
@@ -110,7 +127,7 @@ function logIn(password: string) {
   return login(
     new NextRequest('http://localhost:3000/api/auth/login', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:3000' },
       body: JSON.stringify({ login: 'employee1', password }),
     }),
   );
@@ -154,9 +171,12 @@ describe('POST /api/auth/change-password: success', () => {
     expect(text).not.toMatch(/hash|token|argon2|\$/i);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     const cookies = response.headers.getSetCookie();
-    expect(cookies).toHaveLength(1);
-    expect(cookies[0]).toMatch(new RegExp(`^${COOKIE}=[A-Za-z0-9_-]{43};`));
-    const attributes = (cookies[0] ?? '').split(';').map((part) => part.trim().toLowerCase());
+    expect(cookies).toHaveLength(2);
+    const sessionCookie = cookies.find((cookie) => cookie.startsWith(`${COOKIE}=`)) ?? '';
+    const xsrfCookie = cookies.find((cookie) => cookie.startsWith('XSRF-TOKEN=')) ?? '';
+    expect(sessionCookie).toMatch(new RegExp(`^${COOKIE}=[A-Za-z0-9_-]{43};`));
+    expect(xsrfCookie).toMatch(/^XSRF-TOKEN=[A-Za-z0-9_-]{43};/);
+    const attributes = sessionCookie.split(';').map((part) => part.trim().toLowerCase());
     expect(attributes).toEqual(
       expect.arrayContaining(['httponly', 'secure', 'samesite=lax', 'path=/']),
     );
@@ -499,7 +519,7 @@ describe('POST /api/auth/change-password: malformed requests', () => {
 
       const response = await change(open().token, valid(), { 'content-type': contentType });
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(415);
       expect(credentials()).toStrictEqual(before);
     },
   );
@@ -561,6 +581,8 @@ describe('POST /api/auth/change-password: all or nothing', () => {
         .all()
         .filter((s) => s.revokedAt === null),
     ).toHaveLength(1);
+    expect((await logIn(winner as string)).status).toBe(200);
+    expect((await logIn(loser as string)).status).toBe(401);
   });
 });
 

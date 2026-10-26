@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { createApiClient } from '../../../../../tests/helpers/api-client';
 import { FakeClock } from '../../../../../tests/helpers/fake-clock';
 import { sessionCookieName } from '../auth/cookie';
-import { createSession } from '../auth/session-service';
+import { createSession, hashSessionToken } from '../auth/session-service';
 import { captureOutput } from '../__fixtures__/capture-output';
 import { seedWorld, signInAs } from '../db/__fixtures__/seeded-world';
 import { setUpSharedTestDb } from '../db/__fixtures__/shared-test-db';
@@ -13,6 +13,7 @@ import { db } from '../db/client';
 import { ConflictError as DbConflictError } from '../db/errors';
 import { permissions, rolePermissions, sessions } from '../db/schema';
 import { type PermissionCode, PERMISSIONS, ROLES } from '../permissions/codes';
+import { csrfTokenForSession, XSRF_HEADER_NAME } from '../security/csrf';
 import { ApiError, ConflictError, NotFoundError } from './errors';
 import { MAX_BODY_BYTES } from './json-body';
 import { defineRoute, getRouteMeta } from './route-handler';
@@ -52,10 +53,22 @@ type RequestInitOf = NonNullable<ConstructorParameters<typeof NextRequest>[1]>;
 const withCookie = (
   token: string,
   init: Omit<RequestInitOf, 'headers'> & { headers?: Record<string, string> } = {},
-) => ({
-  ...init,
-  headers: { ...init.headers, cookie: `${sessionCookieName()}=${token}` },
-});
+) => {
+  const session = db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(eq(sessions.tokenHash, hashSessionToken(token)))
+    .get();
+  return {
+    ...init,
+    headers: {
+      origin: URL_BASE,
+      ...(session ? { [XSRF_HEADER_NAME]: csrfTokenForSession(session.id) } : {}),
+      ...init.headers,
+      cookie: `${sessionCookieName()}=${token}`,
+    },
+  };
+};
 
 // An admin-style route: it holds data a refusal must never leak.
 const secretHandler = vi.fn(() => NextResponse.json({ users: ['secret-user-data'] }));
@@ -388,6 +401,41 @@ describe('authentication, stage and permission', () => {
   });
 });
 
+describe('state-changing route CSRF enforcement (SEC-24)', () => {
+  it.each([
+    ['a foreign Origin', { origin: 'https://evil.example' }, 'CSRF_ORIGIN_MISMATCH'],
+    ['a missing XSRF header', { [XSRF_HEADER_NAME]: '' }, 'CSRF_TOKEN_INVALID'],
+    ['an incorrect XSRF header', { [XSRF_HEADER_NAME]: 'incorrect' }, 'CSRF_TOKEN_INVALID'],
+  ])(
+    'returns 403 for %s, does not run the handler and does not record activity',
+    async (_, headers, code) => {
+      const handler = vi.fn(() => new Response('changed'));
+      const route = defineRoute({
+        name: 'test.csrf',
+        auth: { stages: ['FULLY_AUTHENTICATED'] },
+        handler,
+      });
+      const created = createSession(db, ids.guest1 as string, 'FULLY_AUTHENTICATED');
+      const client = createApiClient().signIn({
+        token: created.token,
+        csrfToken: csrfTokenForSession(created.session.id),
+      });
+
+      fakeClock.advance(5 * MINUTE_MS);
+      const response = await client.post({ POST: route }, '/api/test', { headers });
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toStrictEqual({
+        error: { code, message: expect.any(String) },
+      });
+      expect(handler).not.toHaveBeenCalled();
+      expect(
+        db.select().from(sessions).where(eq(sessions.id, created.session.id)).get()?.lastActivityAt,
+      ).toStrictEqual(T0);
+    },
+  );
+});
+
 describe('activity recording', () => {
   function open(login = 'ADMIN') {
     const { token, session } = createSession(db, ids[login] as string, 'FULLY_AUTHENTICATED');
@@ -520,7 +568,7 @@ describe('input validation', () => {
         headers: { 'content-type': contentType },
       });
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(415);
       expect(handler).not.toHaveBeenCalled();
     },
   );
@@ -531,7 +579,7 @@ describe('input validation', () => {
       headers: { 'content-type': 'text/plain' },
     });
 
-    expect(wrongType.status).toBe(400);
+    expect(wrongType.status).toBe(415);
   });
 
   it('does not read or validate the body before the session is admitted: no session and a bad body is 401', async () => {
@@ -597,6 +645,14 @@ describe('input validation', () => {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
+            origin: URL_BASE,
+            [XSRF_HEADER_NAME]: csrfTokenForSession(
+              db
+                .select({ id: sessions.id })
+                .from(sessions)
+                .where(eq(sessions.tokenHash, hashSessionToken(token)))
+                .get()?.id ?? '',
+            ),
             cookie: `${sessionCookieName()}=${token}`,
           },
           body: stream,
