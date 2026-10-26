@@ -43,11 +43,7 @@ export const tickets = sqliteTable(
     index('tickets_created_by_user_id_idx').on(t.createdByUserId),
     index('tickets_assigned_to_user_id_idx').on(t.assignedToUserId),
     index('tickets_status_idx').on(t.status),
-    check(
-      'tickets_status_check',
-      // The values are the constants above, never user input, so sql.raw is safe here.
-      sql`${t.status} IN (${sql.raw(TICKET_STATUSES.map((status) => `'${status}'`).join(', '))})`,
-    ),
+    check('tickets_status_check', sql`${t.status} IN ('OPEN', 'IN_PROGRESS', 'RESOLVED')`),
   ],
 );
 
