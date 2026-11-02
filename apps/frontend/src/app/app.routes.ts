@@ -96,6 +96,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'admin/ip-blocks',
+    title: 'Address blocks',
+    ...requires('ip-blocks:read'),
+    loadComponent: () =>
+      import('./features/admin-security/ip-blocks.component').then((m) => m.IpBlocksComponent),
+  },
+  {
     path: 'tickets',
     title: 'Tickets',
     ...requires(READ_TICKETS),

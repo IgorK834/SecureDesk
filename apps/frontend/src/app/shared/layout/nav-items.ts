@@ -14,6 +14,7 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { label: 'Users', route: '/admin/users', permission: 'users:read' },
   { label: 'Security settings', route: '/admin/security', permission: 'security-settings:read' },
+  { label: 'Address blocks', route: '/admin/ip-blocks', permission: 'ip-blocks:read' },
   { label: 'Tickets', route: '/tickets', permission: READ_TICKETS },
   { label: 'New ticket', route: '/tickets/new', permission: 'tickets:create' },
 ];

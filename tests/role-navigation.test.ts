@@ -61,7 +61,7 @@ describe('navigation per role, derived from the backend matrix', () => {
   it('gives the Administrator user administration and no ticket link', async () => {
     const routes = await navigationFor(ROLES.ADMINISTRATOR);
 
-    expect(routes).toStrictEqual(['/admin/users', '/admin/security']);
+    expect(routes).toStrictEqual(['/admin/users', '/admin/security', '/admin/ip-blocks']);
     expect(routes.filter((route) => route.startsWith('/tickets'))).toStrictEqual([]);
   });
 

@@ -24,6 +24,7 @@ describe('MainNav', () => {
       '/account/two-factor-authentication',
       '/admin/users',
       '/admin/security',
+      '/admin/ip-blocks',
     ]);
     expect(links.filter((href) => href.startsWith('/tickets'))).toStrictEqual([]);
   });
