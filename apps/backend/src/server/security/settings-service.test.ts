@@ -39,6 +39,10 @@ const CUSTOM = {
   rejectPersonalDataInPassword: true,
   passwordMaxAgeDays: 90,
   sessionIdleTimeoutMinutes: 30,
+  maxFailedLoginAttempts: 7,
+  ipFailedAttemptLimit: 40,
+  sprayingDistinctLoginThreshold: 12,
+  securityEventRetentionDays: 30,
 };
 
 describe('updateSecuritySettings', () => {
@@ -52,7 +56,11 @@ describe('updateSecuritySettings', () => {
     ['rejectPersonalDataInPassword', false],
     ['passwordMaxAgeDays', 365],
     ['sessionIdleTimeoutMinutes', 5],
-  ] as const)('changes %s and leaves the other three as they were', (key, value) => {
+    ['maxFailedLoginAttempts', 3],
+    ['ipFailedAttemptLimit', 500],
+    ['sprayingDistinctLoginThreshold', 3],
+    ['securityEventRetentionDays', 365],
+  ] as const)('changes %s and leaves the other seven as they were', (key, value) => {
     const result = updateSecuritySettings(db, adminId, { [key]: value });
 
     expect(result).toStrictEqual({ ...CUSTOM, [key]: value });
@@ -199,6 +207,50 @@ describe('the floor of 12 characters, without Zod in front', () => {
   });
 });
 
+// SEC-37: the ranges of the login-protection settings are enforced twice, by Zod in front of the
+// service and by the CHECK constraints behind it, so a bug above the service cannot store N = 2.
+describe('SEC-37 the login-protection ranges, without Zod in front', () => {
+  beforeEach(() => {
+    db.transaction((tx) => seedSecuritySettings(tx));
+  });
+
+  it.each([
+    ['maxFailedLoginAttempts', 2],
+    ['maxFailedLoginAttempts', 21],
+    ['ipFailedAttemptLimit', 4],
+    ['ipFailedAttemptLimit', 501],
+    ['sprayingDistinctLoginThreshold', 2],
+    ['sprayingDistinctLoginThreshold', 51],
+    ['securityEventRetentionDays', 6],
+    ['securityEventRetentionDays', 366],
+  ] as const)('refuses %s = %i and leaves the stored value alone', (key, value) => {
+    const error = (() => {
+      try {
+        updateSecuritySettings(db, adminId, { [key]: value });
+      } catch (caught) {
+        return caught;
+      }
+      throw new Error(`${key} = ${value} was accepted`);
+    })();
+
+    expect(sqliteCode(error)).toBe('SQLITE_CONSTRAINT_CHECK');
+    expect(getSecuritySettings(db)).toStrictEqual(DEFAULT_SECURITY_SETTINGS);
+  });
+
+  it.each([
+    ['maxFailedLoginAttempts', 3],
+    ['maxFailedLoginAttempts', 20],
+    ['ipFailedAttemptLimit', 5],
+    ['ipFailedAttemptLimit', 500],
+    ['sprayingDistinctLoginThreshold', 3],
+    ['sprayingDistinctLoginThreshold', 50],
+    ['securityEventRetentionDays', 7],
+    ['securityEventRetentionDays', 365],
+  ] as const)('accepts the bound %s = %i', (key, value) => {
+    expect(updateSecuritySettings(db, adminId, { [key]: value })[key]).toBe(value);
+  });
+});
+
 // "GET returns the persisted values after restarting the backend": a restart is a new connection
 // to the same file, so this closes the database and opens the file again.
 describe('persistence across a restart', () => {
@@ -243,12 +295,24 @@ describe('SecuritySettingsPatch', () => {
     [{ passwordMaxAgeDays: null }],
     [{ sessionIdleTimeoutMinutes: 1 }],
     [{ sessionIdleTimeoutMinutes: 1440 }],
+    [{ maxFailedLoginAttempts: 3 }],
+    [{ maxFailedLoginAttempts: 20 }],
+    [{ ipFailedAttemptLimit: 5 }],
+    [{ ipFailedAttemptLimit: 500 }],
+    [{ sprayingDistinctLoginThreshold: 3 }],
+    [{ sprayingDistinctLoginThreshold: 50 }],
+    [{ securityEventRetentionDays: 7 }],
+    [{ securityEventRetentionDays: 365 }],
     [
       {
         minPasswordLength: 14,
         rejectPersonalDataInPassword: true,
         passwordMaxAgeDays: null,
         sessionIdleTimeoutMinutes: 10,
+        maxFailedLoginAttempts: 5,
+        ipFailedAttemptLimit: 20,
+        sprayingDistinctLoginThreshold: 8,
+        securityEventRetentionDays: 90,
       },
     ],
   ])('accepts %j', (patch) => {
@@ -275,6 +339,17 @@ describe('SecuritySettingsPatch', () => {
     ['a personal-data flag as text', { rejectPersonalDataInPassword: 'true' }],
     ['a personal-data flag as a number', { rejectPersonalDataInPassword: 1 }],
     ['a null personal-data flag', { rejectPersonalDataInPassword: null }],
+    ['SEC-37 a maximum of 2 failed attempts', { maxFailedLoginAttempts: 2 }],
+    ['SEC-37 a maximum of 21 failed attempts', { maxFailedLoginAttempts: 21 }],
+    ['a fractional maximum of failed attempts', { maxFailedLoginAttempts: 5.5 }],
+    ['a maximum of failed attempts as text', { maxFailedLoginAttempts: '5' }],
+    ['a null maximum of failed attempts', { maxFailedLoginAttempts: null }],
+    ['an IP limit of 4', { ipFailedAttemptLimit: 4 }],
+    ['an IP limit of 501', { ipFailedAttemptLimit: 501 }],
+    ['a spraying threshold of 2', { sprayingDistinctLoginThreshold: 2 }],
+    ['a spraying threshold of 51', { sprayingDistinctLoginThreshold: 51 }],
+    ['an event retention of 6 days', { securityEventRetentionDays: 6 }],
+    ['an event retention of 366 days', { securityEventRetentionDays: 366 }],
     ['an unknown key', { minPasswordLength: 12, extra: 1 }],
     ['only an unknown key', { passwordHash: 'x' }],
     ['an empty object', {}],
