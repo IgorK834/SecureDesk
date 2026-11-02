@@ -5,7 +5,7 @@ truth**; this document reproduces it for the report.
 
 | What                    | Where (under `apps/backend/src/server/`)                             |
 | ----------------------- | -------------------------------------------------------------------- |
-| The 16 permission codes | `permissions/codes.ts`                                               |
+| The 23 permission codes | `permissions/codes.ts`                                               |
 | Who holds which code    | `permissions/matrix.ts` (`ROLE_PERMISSIONS`), reviewed like any code |
 | Loading it into the DB  | `db/seeds/rbac.ts` (`seedRbac`)                                      |
 | Route-level check       | `http/route-handler.ts` (`defineRoute`), `permissions/authorize.ts`  |
@@ -35,6 +35,9 @@ principle of least privilege:
 | Reset another user's password            | Yes           | No      | No       | No    |
 | Reset another user's TOTP after ID check | Yes           | No      | No       | No    |
 | Read/change global security settings     | Yes           | No      | No       | No    |
+| List and acknowledge security events     | Yes           | No      | No       | No    |
+| Unlock an account, list/clear IP blocks  | Yes           | No      | No       | No    |
+| See and test the honeytokens             | Yes           | No      | No       | No    |
 | Change own regular password              | Yes           | Yes     | Yes      | Yes   |
 | Create a ticket                          | No            | Yes     | Yes      | Yes   |
 | Read all tickets                         | No            | Yes     | No       | No    |
@@ -65,6 +68,13 @@ replaces the ownership check.
 | `users:reset-totp`               | Yes           | No      | No       | No    | out-of-band identity check required     |
 | `security-settings:read`         | Yes           | No      | No       | No    | none                                    |
 | `security-settings:update`       | Yes           | No      | No       | No    | none                                    |
+| `security-events:read`           | Yes           | No      | No       | No    | none                                    |
+| `security-events:acknowledge`    | Yes           | No      | No       | No    | none                                    |
+| `users:unlock`                   | Yes           | No      | No       | No    | clears a temporary lock only            |
+| `ip-blocks:read`                 | Yes           | No      | No       | No    | none                                    |
+| `ip-blocks:clear`                | Yes           | No      | No       | No    | none                                    |
+| `honeytokens:read`               | Yes           | No      | No       | No    | none: no URL or key is ever returned    |
+| `honeytokens:test`               | Yes           | No      | No       | No    | sends a clearly marked test alert       |
 | `tickets:create`                 | No            | Yes     | Yes      | Yes   | none: the creator is always the caller  |
 | `tickets:read:all`               | No            | Yes     | No       | No    | every ticket                            |
 | `tickets:read:assigned`          | No            | Yes     | Yes      | No    | only tickets assigned to the caller     |
@@ -79,6 +89,9 @@ enum built from `PERMISSIONS`, never a hand-typed list, so a code cannot exist i
 
 ## Why this is least privilege
 
+- **Administrator: identities, security settings and abuse-defence tooling, no tickets.** The seven
+  Module 2 codes (security events, account unlock, IP blocks, honeytokens) belong to the
+  Administrator alone; Manager, Employee and Guest hold none of them, and `matrix.test.ts` pins that.
 - **Administrator: identities and security settings, no tickets.** Administering accounts is not a
   reason to read the contents of other people's tickets. With no `tickets:*` code, a stolen or
   misused administrator session reveals no business data, and every ticket endpoint answers `403`.
