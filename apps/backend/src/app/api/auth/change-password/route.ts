@@ -6,6 +6,7 @@ import { db } from '../../../../server/db/client';
 import { defineRoute } from '../../../../server/http/route-handler';
 import { csrfCookie } from '../../../../server/security/csrf';
 import { logEvent } from '../../../../server/security/log-event';
+import { getClientIp } from '../../../../server/security/rate-limiter';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,8 +34,12 @@ export const POST = defineRoute({
   name: 'auth.change_password',
   auth: { stages: ['FULLY_AUTHENTICATED', 'PASSWORD_EXPIRED'] },
   body: ChangePasswordBody,
-  handler: async ({ requestId, session, body }) => {
-    const result = await changePassword(db, session.session, body);
+  handler: async ({ request, requestId, session, body }) => {
+    const result = await changePassword(db, session.session, body, {
+      ip: getClientIp(request),
+      requestId,
+      userAgent: request.headers.get('user-agent'),
+    });
 
     logEvent('auth.change_password.success', requestId);
     const response = NextResponse.json(

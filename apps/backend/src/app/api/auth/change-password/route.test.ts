@@ -15,7 +15,9 @@ import { insertUser } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
 import {
   type AuthStage,
+  loginAttempts,
   passwordHistory,
+  securityEvents,
   securitySettings,
   sessions,
   users,
@@ -344,6 +346,60 @@ describe('POST /api/auth/change-password: the current password (SEC-13)', () => 
     );
 
     expect((await response.json()).error.code).toBe('CURRENT_PASSWORD_INCORRECT');
+  });
+
+  it('SEC-60: the fifth wrong current password revokes sessions and refuses even a correct password for 15 minutes', async () => {
+    const stolen = open();
+    const responses: Response[] = [];
+    for (let attempt = 0; attempt < 5; attempt++) {
+      responses.push(await change(stolen.token, valid({ currentPassword: 'not the password' })));
+    }
+
+    expect(responses.slice(0, 4).map((response) => response.status)).toStrictEqual([
+      400, 400, 400, 400,
+    ]);
+    const fifth = responses[4] as Response;
+    expect(fifth.status).toBe(429);
+    expect(fifth.headers.get('Retry-After')).toBe('900');
+    expect(await fifth.json()).toStrictEqual({
+      error: {
+        code: 'AUTH_PASSWORD_CHANGE_LOCKED',
+        message: 'Zmiana hasła jest tymczasowo zablokowana po zbyt wielu nieudanych próbach',
+        details: {
+          lockedUntil: '2030-01-01T00:15:00.000Z',
+          retryAfterSeconds: 900,
+        },
+      },
+    });
+    expect((await whoAmI(stolen.token)).status).toBe(401);
+
+    const freshLogin = await logIn(CURRENT);
+    expect(freshLogin.status).toBe(200);
+    const correctDuringLock = await change(cookieValue(freshLogin), valid());
+    expect(correctDuringLock.status).toBe(429);
+    expect((await correctDuringLock.json()).error.code).toBe('AUTH_PASSWORD_CHANGE_LOCKED');
+
+    expect(
+      db
+        .select()
+        .from(loginAttempts)
+        .all()
+        .filter((attempt) => attempt.kind === 'PASSWORD_CHANGE' && attempt.outcome === 'FAILED'),
+    ).toHaveLength(5);
+    expect(
+      db
+        .select()
+        .from(loginAttempts)
+        .all()
+        .filter((attempt) => attempt.kind === 'CREDENTIAL' && attempt.outcome === 'FAILED'),
+    ).toHaveLength(0);
+    const event = db
+      .select()
+      .from(securityEvents)
+      .where(eq(securityEvents.type, 'CHANGE_PASSWORD_BRUTE_FORCE'))
+      .get();
+    expect(event).toMatchObject({ userId });
+    expect(JSON.parse(event?.details ?? '{}')).toStrictEqual({ failures: 5 });
   });
 });
 
