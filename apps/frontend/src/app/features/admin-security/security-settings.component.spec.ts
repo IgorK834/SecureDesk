@@ -13,12 +13,20 @@ const SETTINGS: SecuritySettings = {
   rejectPersonalDataInPassword: false,
   passwordMaxAgeDays: null,
   sessionIdleTimeoutMinutes: 15,
+  maxFailedLoginAttempts: 5,
+  ipFailedAttemptLimit: 20,
+  sprayingDistinctLoginThreshold: 8,
+  securityEventRetentionDays: 90,
 };
 const CUSTOM: SecuritySettings = {
   minPasswordLength: 20,
   rejectPersonalDataInPassword: true,
   passwordMaxAgeDays: 90,
   sessionIdleTimeoutMinutes: 30,
+  maxFailedLoginAttempts: 10,
+  ipFailedAttemptLimit: 100,
+  sprayingDistinctLoginThreshold: 15,
+  securityEventRetentionDays: 120,
 };
 const MAY_UPDATE = ['security-settings:read', 'security-settings:update'];
 
@@ -28,6 +36,10 @@ const FIELD = {
   maxAge: 'max-age',
   maxAgeOff: 'max-age-disabled',
   idle: 'idle-timeout',
+  maxFailed: 'max-failed-attempts',
+  ipLimit: 'ip-limit',
+  spraying: 'spraying-threshold',
+  retention: 'event-retention',
 } as const;
 type FieldName = keyof typeof FIELD;
 
@@ -100,7 +112,7 @@ describe('SecuritySettingsComponent: showing the settings', () => {
     expect(t.api.updateSecuritySettings).not.toHaveBeenCalled();
   });
 
-  it('shows the four settings as the server reports them', () => {
+  it('shows the eight settings as the server reports them', () => {
     const t = setUp({ get: () => of(CUSTOM) });
 
     expect(t.root.querySelector('h1')?.textContent).toBe('Security settings');
@@ -108,6 +120,20 @@ describe('SecuritySettingsComponent: showing the settings', () => {
     expect(t.checked('personalData')).toBe(true);
     expect(t.value('maxAge')).toBe('90');
     expect(t.value('idle')).toBe('30');
+    expect(t.value('maxFailed')).toBe('10');
+    expect(t.value('ipLimit')).toBe('100');
+    expect(t.value('spraying')).toBe('15');
+    expect(t.value('retention')).toBe('120');
+  });
+
+  it('shows a "Login protection" group with the fixed lock duration and window as read-only text', () => {
+    const t = setUp();
+    const group = t.root.querySelector('fieldset') as HTMLFieldSetElement;
+
+    expect(group.querySelector('legend')?.textContent).toBe('Login protection');
+    expect(group.textContent).toContain('Lock duration: 15 minutes · attempt window: 15 minutes');
+    expect(group.querySelectorAll('input[type="number"]')).toHaveLength(4);
+    expect(group.querySelectorAll('input:not([type="number"])')).toHaveLength(0);
   });
 
   it('shows a switched-off rule as off', () => {
@@ -156,17 +182,25 @@ describe('SecuritySettingsComponent: showing the settings', () => {
     expect(hint(FIELD.minLength)).toContain('next password change');
     expect(hint(FIELD.maxAge)).toContain('next sign-in');
     expect(hint(FIELD.idle)).toContain('open now');
+    expect(hint(FIELD.maxFailed)).toContain('next login attempt');
+    expect(hint(FIELD.ipLimit)).toContain('next login attempt');
+    expect(hint(FIELD.spraying)).toContain('next login attempt');
+    expect(hint(FIELD.retention)).toContain('next clean-up');
     expect(t.text()).toContain('first or last name');
   });
 });
 
 describe('SecuritySettingsComponent: saving', () => {
-  it('sends all four settings, as the right types', () => {
+  it('sends all eight settings, as the right types', () => {
     const t = setUp({ get: () => of(CUSTOM) });
     t.type('minLength', '16');
     t.tick('personalData', false);
     t.type('maxAge', '45');
     t.type('idle', '5');
+    t.type('maxFailed', '3');
+    t.type('ipLimit', '250');
+    t.type('spraying', '20');
+    t.type('retention', '30');
 
     t.save();
 
@@ -176,6 +210,10 @@ describe('SecuritySettingsComponent: saving', () => {
         rejectPersonalDataInPassword: false,
         passwordMaxAgeDays: 45,
         sessionIdleTimeoutMinutes: 5,
+        maxFailedLoginAttempts: 3,
+        ipFailedAttemptLimit: 250,
+        sprayingDistinctLoginThreshold: 20,
+        securityEventRetentionDays: 30,
       },
     ]);
   });
@@ -277,6 +315,19 @@ describe('SecuritySettingsComponent: what is checked before anything is sent', (
     ['maxAge', '0', 'Use at least 1 day.'],
     ['maxAge', '3651', 'Use at most 3650 days.'],
     ['maxAge', '30.5', 'Use a whole number.'],
+    ['maxFailed', '2', 'Use at least 3 attempts.'],
+    ['maxFailed', '21', 'Use at most 20 attempts.'],
+    ['maxFailed', '2.5', 'Use a whole number.'],
+    ['maxFailed', '', 'Enter a number of attempts.'],
+    ['ipLimit', '4', 'Use at least 5 attempts.'],
+    ['ipLimit', '501', 'Use at most 500 attempts.'],
+    ['ipLimit', '', 'Enter a number of attempts.'],
+    ['spraying', '2', 'Use at least 3 logins.'],
+    ['spraying', '51', 'Use at most 50 logins.'],
+    ['spraying', '', 'Enter a number of logins.'],
+    ['retention', '6', 'Use at least 7 days.'],
+    ['retention', '366', 'Use at most 365 days.'],
+    ['retention', '', 'Enter a number of days.'],
   ] as [FieldName, string, string][])(
     'refuses %s = "%s" with its own message and sends nothing',
     (name, value, message) => {
@@ -297,6 +348,14 @@ describe('SecuritySettingsComponent: what is checked before anything is sent', (
     ['idle', '1440', 'sessionIdleTimeoutMinutes', 1440],
     ['maxAge', '1', 'passwordMaxAgeDays', 1],
     ['maxAge', '3650', 'passwordMaxAgeDays', 3650],
+    ['maxFailed', '3', 'maxFailedLoginAttempts', 3],
+    ['maxFailed', '20', 'maxFailedLoginAttempts', 20],
+    ['ipLimit', '5', 'ipFailedAttemptLimit', 5],
+    ['ipLimit', '500', 'ipFailedAttemptLimit', 500],
+    ['spraying', '3', 'sprayingDistinctLoginThreshold', 3],
+    ['spraying', '50', 'sprayingDistinctLoginThreshold', 50],
+    ['retention', '7', 'securityEventRetentionDays', 7],
+    ['retention', '365', 'securityEventRetentionDays', 365],
   ] as [FieldName, string, keyof SecuritySettings, number][])(
     'accepts the limit itself: %s = %s',
     (name, value, key, sent) => {
@@ -420,7 +479,17 @@ describe('SecuritySettingsComponent: who may change the settings', () => {
 
     expect(t.value('minLength')).toBe('20');
     expect(t.saveButton()).toBeNull();
-    for (const name of ['minLength', 'personalData', 'maxAge', 'maxAgeOff', 'idle'] as const) {
+    for (const name of [
+      'minLength',
+      'personalData',
+      'maxAge',
+      'maxAgeOff',
+      'idle',
+      'maxFailed',
+      'ipLimit',
+      'spraying',
+      'retention',
+    ] as const) {
       expect(t.input(name).disabled, name).toBe(true);
     }
   });
