@@ -257,6 +257,50 @@ export function recordSecurityEvent(db: AppDb, input: SecurityEventInput): strin
 }
 
 /**
+ * Stores at most one event of this type for one address in the current aggregation bucket.
+ * Unlike `recordAggregated`, repeated observations do not increase a counter. This is used for
+ * threshold signals such as password spraying, where one event per bucket is sufficient.
+ */
+export function recordSecurityEventOncePerBucket(
+  db: AppDb,
+  input: SecurityEventInput,
+): string | undefined {
+  const details = validated(input.type, input.details);
+  if (!details) return undefined;
+
+  const ipKey = input.ipKey ?? null;
+  const now = clock.now().getTime();
+  const bucketStart = new Date(now - (now % AGGREGATION_BUCKET_MS));
+  const bucketEnd = new Date(bucketStart.getTime() + AGGREGATION_BUCKET_MS);
+  const inserted = db.transaction(
+    (tx) => {
+      const existing = tx
+        .select({ id: securityEvents.id })
+        .from(securityEvents)
+        .where(
+          and(
+            eq(securityEvents.type, input.type),
+            ipKey === null ? isNull(securityEvents.ipKey) : eq(securityEvents.ipKey, ipKey),
+            gte(securityEvents.occurredAt, bucketStart),
+            lt(securityEvents.occurredAt, bucketEnd),
+          ),
+        )
+        .get();
+      if (existing) return undefined;
+
+      const row = newRow(input, details);
+      tx.insert(securityEvents).values(row).run();
+      return row;
+    },
+    { behavior: 'immediate' },
+  );
+
+  if (!inserted) return undefined;
+  afterInsert(db, inserted, details);
+  return inserted.id;
+}
+
+/**
  * Records an occurrence of a noisy event type. The first one in a 5-minute bucket for one address
  * creates the row (`details.count = 1`); the following ones only raise the counter, so a thousand
  * identical events are one row with `details.count = 1000`. The other details are those of the

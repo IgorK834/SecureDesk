@@ -15,7 +15,3 @@ env.CSRF_SECRET = 'test-only-csrf-secret-with-at-least-32-bytes';
 env.TOTP_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
 delete env.E2E_DATABASE_PATH;
 delete env.COOKIE_SECURE;
-import { beforeEach } from 'vitest';
-import { resetLoginRateLimiterForTests } from '../../apps/backend/src/server/security/login-rate-limiter';
-
-beforeEach(() => resetLoginRateLimiterForTests());
