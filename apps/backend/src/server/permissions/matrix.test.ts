@@ -2,6 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { PERMISSIONS, ROLES, type PermissionCode, type RoleId } from './codes';
 import { PERMISSION_DESCRIPTIONS, ROLE_DEFINITIONS, ROLE_PERMISSIONS } from './matrix';
 
+// The seven codes of Module 2 (backlog section 5), typed out as plain strings for the same reason
+// as the expected sets below.
+const MODULE_2_CODES = [
+  'security-events:read',
+  'security-events:acknowledge',
+  'users:unlock',
+  'ip-blocks:read',
+  'ip-blocks:clear',
+  'honeytokens:read',
+  'honeytokens:test',
+] as const;
+const MODULE_2_PERMISSIONS = [
+  PERMISSIONS.SECURITY_EVENTS_READ,
+  PERMISSIONS.SECURITY_EVENTS_ACKNOWLEDGE,
+  PERMISSIONS.USERS_UNLOCK,
+  PERMISSIONS.IP_BLOCKS_READ,
+  PERMISSIONS.IP_BLOCKS_CLEAR,
+  PERMISSIONS.HONEYTOKENS_READ,
+  PERMISSIONS.HONEYTOKENS_TEST,
+];
+
 const can = (role: RoleId, permission: PermissionCode) =>
   ROLE_PERMISSIONS[role].includes(permission);
 
@@ -25,6 +46,13 @@ describe('exact permission set of each role (backlog section 5, least privilege)
         'users:reset-totp',
         'security-settings:read',
         'security-settings:update',
+        'security-events:read',
+        'security-events:acknowledge',
+        'users:unlock',
+        'ip-blocks:read',
+        'ip-blocks:clear',
+        'honeytokens:read',
+        'honeytokens:test',
       ].sort(),
     );
   });
@@ -74,7 +102,7 @@ describe('exact permission set of each role (backlog section 5, least privilege)
     expect(startingWith(ROLES.ADMINISTRATOR, 'tickets:')).toEqual([]);
   });
 
-  it('grants nothing outside the 16 defined codes (a typo in the matrix would be caught here)', () => {
+  it('grants nothing outside the 23 defined codes (a typo in the matrix would be caught here)', () => {
     const defined = new Set<string>(Object.values(PERMISSIONS));
 
     for (const role of Object.values(ROLES)) {
@@ -86,9 +114,30 @@ describe('exact permission set of each role (backlog section 5, least privilege)
   });
 });
 
+describe('Module 2 permission codes (backlog section 5)', () => {
+  it('Administrator holds exactly the seven new codes', () => {
+    expect(
+      codesOf(ROLES.ADMINISTRATOR)
+        .filter((code) => MODULE_2_CODES.some((c) => c === code))
+        .sort(),
+    ).toEqual([...MODULE_2_CODES].sort());
+    expect([...MODULE_2_PERMISSIONS].sort()).toEqual([...MODULE_2_CODES].sort());
+  });
+
+  it.each([ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.GUEST])('%s holds none of them', (role) => {
+    expect(codesOf(role).filter((code) => MODULE_2_CODES.some((c) => c === code))).toEqual([]);
+  });
+
+  it('keeps the new Administrator codes out of every ticket-oriented role', () => {
+    expect(startingWith(ROLES.MANAGER, 'security-events:', 'ip-blocks:', 'honeytokens:')).toEqual(
+      [],
+    );
+  });
+});
+
 describe('role/permission matrix (backlog section 5)', () => {
   it.each([
-    [ROLES.ADMINISTRATOR, 9],
+    [ROLES.ADMINISTRATOR, 16],
     [ROLES.MANAGER, 7],
     [ROLES.EMPLOYEE, 4],
     [ROLES.GUEST, 2],
@@ -108,6 +157,7 @@ describe('role/permission matrix (backlog section 5)', () => {
       PERMISSIONS.USERS_RESET_TOTP,
       PERMISSIONS.SECURITY_SETTINGS_READ,
       PERMISSIONS.SECURITY_SETTINGS_UPDATE,
+      ...MODULE_2_PERMISSIONS,
     ];
 
     for (const permission of adminOnly) {
