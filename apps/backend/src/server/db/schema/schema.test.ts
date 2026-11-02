@@ -72,12 +72,16 @@ function newSession(userId: string, overrides: Partial<typeof sessions.$inferIns
 }
 
 describe('migrated schema', () => {
-  it('contains the seven core tables and the tickets table', () => {
+  it('contains the seven core tables, the tickets table and the four Module 2 tables', () => {
     expect(tableNames()).toEqual([
+      'captcha_challenges',
+      'honeytokens',
+      'login_attempts',
       'password_history',
       'permissions',
       'role_permissions',
       'roles',
+      'security_events',
       'security_settings',
       'sessions',
       'tickets',
@@ -99,6 +103,29 @@ describe('migrated schema', () => {
       columns: ['assigned_to_user_id'],
     });
     expect(indexesOf('tickets')).toContainEqual({ unique: false, columns: ['status'] });
+    // Module 2 (backlog section 4): attempt counters read by login and by IP, purges by time.
+    expect(indexesOf('login_attempts')).toEqual(
+      expect.arrayContaining([
+        { unique: false, columns: ['login_normalized', 'occurred_at'] },
+        { unique: false, columns: ['ip_key', 'occurred_at'] },
+        { unique: false, columns: ['occurred_at'] },
+      ]),
+    );
+    expect(indexesOf('security_events')).toEqual(
+      expect.arrayContaining([
+        { unique: false, columns: ['occurred_at'] },
+        { unique: false, columns: ['severity', 'acknowledged_at'] },
+        { unique: false, columns: ['type'] },
+      ]),
+    );
+    expect(indexesOf('honeytokens')).toContainEqual({
+      unique: true,
+      columns: ['login_normalized'],
+    });
+    expect(indexesOf('captcha_challenges')).toContainEqual({
+      unique: false,
+      columns: ['expires_at'],
+    });
   });
 });
 
@@ -149,8 +176,9 @@ describe('the Drizzle schema in code matches the migrations', () => {
     expect(declared.sort()).toEqual(migrated.sort());
     // role_permissions -> roles, role_permissions -> permissions, users -> roles,
     // password_history -> users, sessions -> users, security_settings -> users,
-    // tickets -> users (creator), tickets -> users (assignee)
-    expect(declared).toHaveLength(8);
+    // tickets -> users (creator), tickets -> users (assignee), security_events -> users (subject),
+    // security_events -> users (acknowledged by), security_events -> honeytokens
+    expect(declared).toHaveLength(11);
   });
 });
 
@@ -179,6 +207,11 @@ describe('no plaintext credentials can be stored', () => {
     'security_settings.min_password_length',
     'security_settings.reject_personal_data_in_password',
     'security_settings.password_max_age_days',
+    // `ip_key` is a normalized client address and `honeytoken_id` the id of a trap: neither is a key.
+    'login_attempts.ip_key',
+    'security_events.ip_key',
+    'security_events.honeytoken_id',
+    'captcha_challenges.ip_key',
   ];
 
   it('limits credential-like columns to password_hash and token_hash plus non-secret metadata', () => {
@@ -193,10 +226,12 @@ describe('no plaintext credentials can be stored', () => {
     );
   });
 
+  // `honeytokens` is a registry of traps: it holds the NAME of an environment variable, never a
+  // Canarytokens URL or key.
   it('has no table that looks like it keeps credentials, other than the password history', () => {
-    expect(tableNames().filter((table) => CREDENTIAL_NAME.test(table))).toEqual([
-      'password_history',
-    ]);
+    expect(
+      tableNames().filter((table) => CREDENTIAL_NAME.test(table) && table !== 'honeytokens'),
+    ).toEqual(['password_history']);
   });
 
   // Guards the guard: a pattern that matched nothing new would let the tests above pass forever.

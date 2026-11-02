@@ -13,6 +13,10 @@ export function seedSecuritySettings(tx: AppTransaction): void {
       rejectPersonalDataInPassword: false,
       passwordMaxAgeDays: null,
       sessionIdleTimeoutMinutes: 15,
+      maxFailedLoginAttempts: 5,
+      ipFailedAttemptLimit: 20,
+      sprayingDistinctLoginThreshold: 8,
+      securityEventRetentionDays: 90,
     })
     .onConflictDoNothing()
     .run();
