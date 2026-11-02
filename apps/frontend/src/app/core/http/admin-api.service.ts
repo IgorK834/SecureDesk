@@ -14,6 +14,7 @@ export interface AdminUser {
   lastName: string;
   role: Role;
   isBlocked: boolean;
+  lockedUntil: string | null;
   mustChangePassword: boolean;
   temporaryPasswordExpiresAt: string | null;
   passwordChangedAt: string | null;
@@ -22,7 +23,13 @@ export interface AdminUser {
 }
 
 /** `pending`: not blocked, but the first password change is still owed. */
-export type UserStatus = 'active' | 'blocked' | 'pending';
+export type UserStatus = 'active' | 'blocked' | 'locked' | 'pending';
+
+export interface IpBlock {
+  ipKey: string;
+  failedAttempts: number;
+  lockedUntil: string;
+}
 
 export interface AdminUserQuery {
   q?: string | undefined;
@@ -84,6 +91,7 @@ export interface SecuritySettings {
 
 const USERS_URL = '/api/admin/users';
 const SECURITY_SETTINGS_URL = '/api/admin/security-settings';
+const IP_BLOCKS_URL = '/api/admin/ip-blocks';
 const userUrl = (id: string) => `${USERS_URL}/${encodeURIComponent(id)}`;
 
 /**
@@ -124,6 +132,10 @@ export class AdminApi {
     return this.http.post<AdminUser>(`${userUrl(id)}/unblock`, null);
   }
 
+  unlock(id: string): Observable<AdminUser> {
+    return this.http.post<AdminUser>(`${userUrl(id)}/unlock`, null);
+  }
+
   /**
    * Replaces the account's password with a temporary one and ends its sessions. The body is an
    * empty object, not nothing: the endpoint insists on JSON so a plain form post cannot trigger it.
@@ -144,5 +156,13 @@ export class AdminApi {
   /** Any non-empty subset of the settings; the answer is all eight as stored. */
   updateSecuritySettings(changes: Partial<SecuritySettings>): Observable<SecuritySettings> {
     return this.http.patch<SecuritySettings>(SECURITY_SETTINGS_URL, changes);
+  }
+
+  listIpBlocks(): Observable<{ items: IpBlock[] }> {
+    return this.http.get<{ items: IpBlock[] }>(IP_BLOCKS_URL);
+  }
+
+  clearIpBlock(ipKey: string): Observable<void> {
+    return this.http.delete<void>(`${IP_BLOCKS_URL}/${encodeURIComponent(ipKey)}`);
   }
 }

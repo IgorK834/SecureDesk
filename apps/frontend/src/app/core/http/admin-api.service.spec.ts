@@ -118,6 +118,7 @@ describe('AdminApi: one account', () => {
   it.each([
     ['block', (api: AdminApi) => api.block('u-1'), '/api/admin/users/u-1/block'],
     ['unblock', (api: AdminApi) => api.unblock('u-1'), '/api/admin/users/u-1/unblock'],
+    ['unlock', (api: AdminApi) => api.unlock('u-1'), '/api/admin/users/u-1/unlock'],
   ])('%s: POST with no body to %s', (_name, call, url) => {
     const { api, http } = setUp();
     call(api).subscribe();
@@ -152,6 +153,32 @@ describe('AdminApi: one account', () => {
     for (const request of http.match(() => true)) {
       expect(request.request.url).toMatch(/^\/api\/admin\/users/);
     }
+  });
+});
+
+describe('AdminApi: address blocks', () => {
+  it('lists blocks and clears an encoded address key', () => {
+    const { api, http } = setUp();
+    let items;
+    api.listIpBlocks().subscribe((result) => (items = result.items));
+    const list = http.expectOne('/api/admin/ip-blocks');
+    list.flush({
+      items: [
+        {
+          ipKey: '2001:db8::/64',
+          failedAttempts: 20,
+          lockedUntil: '2030-01-01T00:15:00.000Z',
+        },
+      ],
+    });
+    expect(list.request.method).toBe('GET');
+    expect(items).toHaveLength(1);
+
+    api.clearIpBlock('2001:db8::/64').subscribe();
+    const clear = http.expectOne('/api/admin/ip-blocks/2001%3Adb8%3A%3A%2F64');
+    expect(clear.request.method).toBe('DELETE');
+    clear.flush(null, { status: 204, statusText: 'No Content' });
+    http.verify();
   });
 });
 

@@ -6,6 +6,9 @@ import type { LoginResponse, PasswordChangeResponse } from './auth.models';
 export interface LoginRequest {
   login: string;
   password: string;
+  captcha?: { token: string } | { challengeId: string; answer: string };
+  website?: string;
+  formToken?: string;
 }
 
 export interface ChangeInitialPasswordRequest {
