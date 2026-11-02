@@ -3,7 +3,13 @@ import { sql } from 'drizzle-orm';
 import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { clock } from '../../time/clock';
 
-export const LOGIN_ATTEMPT_KINDS = ['CREDENTIAL', 'CAPTCHA', 'HONEYPOT', 'MARKER'] as const;
+export const LOGIN_ATTEMPT_KINDS = [
+  'CREDENTIAL',
+  'PASSWORD_CHANGE',
+  'CAPTCHA',
+  'HONEYPOT',
+  'MARKER',
+] as const;
 export const LOGIN_ATTEMPT_OUTCOMES = ['PENDING', 'FAILED', 'SUCCESS', 'CLEARED'] as const;
 
 export type LoginAttemptKind = (typeof LOGIN_ATTEMPT_KINDS)[number];
@@ -40,7 +46,7 @@ export const loginAttempts = sqliteTable(
     index('login_attempts_occurred_at_idx').on(t.occurredAt),
     check(
       'login_attempts_kind_check',
-      sql`${t.kind} IN ('CREDENTIAL', 'CAPTCHA', 'HONEYPOT', 'MARKER')`,
+      sql`${t.kind} IN ('CREDENTIAL', 'PASSWORD_CHANGE', 'CAPTCHA', 'HONEYPOT', 'MARKER')`,
     ),
     check(
       'login_attempts_outcome_check',

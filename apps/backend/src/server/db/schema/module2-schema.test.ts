@@ -278,7 +278,7 @@ describe('migration 0004 on a Module 1 database', () => {
     const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
       entries: { tag: string }[];
     };
-    journal.entries = journal.entries.filter((entry) => !entry.tag.startsWith('0004_'));
+    journal.entries = journal.entries.filter((entry) => Number(entry.tag.slice(0, 4)) < 4);
     writeFileSync(journalPath, JSON.stringify(journal));
     return target;
   }
