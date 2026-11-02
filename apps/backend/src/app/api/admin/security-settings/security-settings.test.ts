@@ -6,11 +6,18 @@ import { hashPassword } from '../../../../server/auth/password-hasher';
 import { seedWorld, signInAs } from '../../../../server/db/__fixtures__/seeded-world';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
 import { db } from '../../../../server/db/client';
-import { type AuthStage, securitySettings, sessions, users } from '../../../../server/db/schema';
+import {
+  type AuthStage,
+  securityEvents,
+  securitySettings,
+  sessions,
+  users,
+} from '../../../../server/db/schema';
 import { seedSecuritySettings } from '../../../../server/db/seeds/security-settings';
 import * as changePasswordRoute from '../../auth/change-password/route';
 import * as loginRoute from '../../auth/login/route';
 import * as meRoute from '../../auth/me/route';
+import { readSecuritySettings } from '../../../../server/security/settings';
 import * as settingsRoute from './route';
 
 // The security settings API end to end: real route handlers, real sessions and cookies, a real
@@ -49,14 +56,22 @@ const DEFAULTS = {
   rejectPersonalDataInPassword: false,
   passwordMaxAgeDays: null,
   sessionIdleTimeoutMinutes: 15,
+  maxFailedLoginAttempts: 5,
+  ipFailedAttemptLimit: 20,
+  sprayingDistinctLoginThreshold: 8,
+  securityEventRetentionDays: 90,
 };
 
-/** What a response carries: exactly the four settings, nothing about who changed them. */
+/** What a response carries: exactly the eight settings, nothing about who changed them. */
 const SETTINGS_KEYS = [
+  'ipFailedAttemptLimit',
+  'maxFailedLoginAttempts',
   'minPasswordLength',
   'passwordMaxAgeDays',
   'rejectPersonalDataInPassword',
+  'securityEventRetentionDays',
   'sessionIdleTimeoutMinutes',
+  'sprayingDistinctLoginThreshold',
 ];
 
 const asUser = (login?: string, stage: AuthStage = 'FULLY_AUTHENTICATED'): ApiClient => {
@@ -87,7 +102,7 @@ async function configure(patch: Record<string, unknown>) {
 // ---------------------------------------------------------------------------------------------
 
 describe('GET /api/admin/security-settings', () => {
-  it('lets the Administrator read the four settings, uncacheable', async () => {
+  it('lets the Administrator read the eight settings, uncacheable', async () => {
     const response = await apiGet(asUser('ADMIN'));
 
     expect(response.status).toBe(200);
@@ -114,10 +129,10 @@ describe('GET /api/admin/security-settings', () => {
       .run();
 
     expect(await body(await apiGet(admin))).toStrictEqual({
+      ...DEFAULTS,
       minPasswordLength: 18,
       rejectPersonalDataInPassword: true,
       passwordMaxAgeDays: 60,
-      sessionIdleTimeoutMinutes: 15,
     });
   });
 
@@ -152,7 +167,11 @@ describe('PATCH /api/admin/security-settings: what it changes', () => {
     ['rejectPersonalDataInPassword', true],
     ['passwordMaxAgeDays', 90],
     ['sessionIdleTimeoutMinutes', 30],
-  ])('changes %s, answers with all four and leaves the others alone', async (key, value) => {
+    ['maxFailedLoginAttempts', 3],
+    ['ipFailedAttemptLimit', 100],
+    ['sprayingDistinctLoginThreshold', 25],
+    ['securityEventRetentionDays', 30],
+  ])('changes %s, answers with all eight and leaves the others alone', async (key, value) => {
     const response = await apiPatch(asUser('ADMIN'), { [key]: value });
 
     expect(response.status).toBe(200);
@@ -169,6 +188,10 @@ describe('PATCH /api/admin/security-settings: what it changes', () => {
       rejectPersonalDataInPassword: true,
       passwordMaxAgeDays: 45,
       sessionIdleTimeoutMinutes: 5,
+      maxFailedLoginAttempts: 8,
+      ipFailedAttemptLimit: 60,
+      sprayingDistinctLoginThreshold: 12,
+      securityEventRetentionDays: 180,
     };
 
     await apiPatch(admin, patch);
@@ -207,6 +230,18 @@ describe('PATCH /api/admin/security-settings: what it changes', () => {
     for (const patch of [
       { minPasswordLength: 12, passwordMaxAgeDays: 1, sessionIdleTimeoutMinutes: 1 },
       { minPasswordLength: 128, passwordMaxAgeDays: 3650, sessionIdleTimeoutMinutes: 1440 },
+      {
+        maxFailedLoginAttempts: 3,
+        ipFailedAttemptLimit: 5,
+        sprayingDistinctLoginThreshold: 3,
+        securityEventRetentionDays: 7,
+      },
+      {
+        maxFailedLoginAttempts: 20,
+        ipFailedAttemptLimit: 500,
+        sprayingDistinctLoginThreshold: 50,
+        securityEventRetentionDays: 365,
+      },
     ]) {
       expect((await apiPatch(admin, patch)).status).toBe(200);
     }
@@ -266,6 +301,15 @@ describe('PATCH /api/admin/security-settings: what it refuses', () => {
     ['a negative idle timeout', { sessionIdleTimeoutMinutes: -1 }],
     ['an idle timeout of 1441', { sessionIdleTimeoutMinutes: 1441 }],
     ['a fractional idle timeout', { sessionIdleTimeoutMinutes: 0.5 }],
+    ['SEC-37 a failed-attempt limit of 2', { maxFailedLoginAttempts: 2 }],
+    ['SEC-37 a failed-attempt limit of 21', { maxFailedLoginAttempts: 21 }],
+    ['a failed-attempt limit written as text', { maxFailedLoginAttempts: '5' }],
+    ['an IP limit of 4', { ipFailedAttemptLimit: 4 }],
+    ['an IP limit of 501', { ipFailedAttemptLimit: 501 }],
+    ['a spraying threshold of 2', { sprayingDistinctLoginThreshold: 2 }],
+    ['a spraying threshold of 51', { sprayingDistinctLoginThreshold: 51 }],
+    ['an event retention of 6 days', { securityEventRetentionDays: 6 }],
+    ['an event retention of 366 days', { securityEventRetentionDays: 366 }],
     ['a maximum password age of 0', { passwordMaxAgeDays: 0 }],
     ['a maximum password age of 3651', { passwordMaxAgeDays: 3651 }],
     ['a personal-data flag written as text', { rejectPersonalDataInPassword: 'yes' }],
@@ -635,5 +679,95 @@ describe('the maximum password age (passwordMaxAgeDays)', () => {
     await configure({ passwordMaxAgeDays: 1 });
 
     expect((await body(await apiMe(employee))).authStage).toBe('FULLY_AUTHENTICATED');
+  });
+});
+
+describe('the login-protection settings (Module 2, SEC-37)', () => {
+  const events = () => db.select().from(securityEvents).all();
+
+  it('saves all eight settings in one request and reads them back', async () => {
+    const all = {
+      minPasswordLength: 14,
+      rejectPersonalDataInPassword: true,
+      passwordMaxAgeDays: 120,
+      sessionIdleTimeoutMinutes: 20,
+      maxFailedLoginAttempts: 10,
+      ipFailedAttemptLimit: 250,
+      sprayingDistinctLoginThreshold: 30,
+      securityEventRetentionDays: 200,
+    };
+
+    const patched = await apiPatch(asUser('ADMIN'), all);
+
+    expect(await body(patched)).toStrictEqual(all);
+    expect(await body(await apiGet(asUser('ADMIN')))).toStrictEqual(all);
+  });
+
+  it('applies a new failed-attempt limit to the very next read, with no cache in between', async () => {
+    expect(readSecuritySettings(db).maxFailedLoginAttempts).toBe(5);
+
+    await configure({ maxFailedLoginAttempts: 12 });
+
+    expect(readSecuritySettings(db).maxFailedLoginAttempts).toBe(12);
+    await configure({ maxFailedLoginAttempts: 3 });
+    expect(readSecuritySettings(db).maxFailedLoginAttempts).toBe(3);
+  });
+
+  it('refuses every limit outside its range, and the database would too', async () => {
+    const outOfRange = [
+      { maxFailedLoginAttempts: 2 },
+      { maxFailedLoginAttempts: 21 },
+      { ipFailedAttemptLimit: 4 },
+      { ipFailedAttemptLimit: 501 },
+      { sprayingDistinctLoginThreshold: 2 },
+      { sprayingDistinctLoginThreshold: 51 },
+      { securityEventRetentionDays: 6 },
+      { securityEventRetentionDays: 366 },
+    ];
+
+    for (const patch of outOfRange) {
+      expect((await apiPatch(asUser('ADMIN'), patch)).status, JSON.stringify(patch)).toBe(400);
+      expect(() => db.update(securitySettings).set(patch).run(), JSON.stringify(patch)).toThrow();
+    }
+    expect(storedRow()).toMatchObject(DEFAULTS);
+  });
+
+  it.each(['manager1', 'employee1', 'guest1'])(
+    '%s may neither read nor change them (403)',
+    async (login) => {
+      expect((await apiGet(asUser(login))).status).toBe(403);
+      expect((await apiPatch(asUser(login), { maxFailedLoginAttempts: 10 })).status).toBe(403);
+      expect(storedRow()).toMatchObject(DEFAULTS);
+      expect(events()).toHaveLength(0);
+    },
+  );
+
+  it('records one SECURITY_SETTINGS_CHANGED event naming the keys and the administrator, not the values', async () => {
+    const response = await asUser('ADMIN').patch(settingsRoute, '/api/admin/security-settings', {
+      json: { maxFailedLoginAttempts: 7, securityEventRetentionDays: 31 },
+      headers: { 'user-agent': 'Vitest/1' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(events()).toMatchObject([
+      {
+        type: 'SECURITY_SETTINGS_CHANGED',
+        severity: 'INFO',
+        userId: ids.ADMIN,
+        userAgent: 'Vitest/1',
+        alertStatus: 'NONE',
+      },
+    ]);
+    expect(JSON.parse((events()[0] as { details: string }).details)).toStrictEqual({
+      adminId: ids.ADMIN,
+      changedKeys: ['maxFailedLoginAttempts', 'securityEventRetentionDays'],
+    });
+  });
+
+  it('records no event for a refused change', async () => {
+    await apiPatch(asUser('ADMIN'), { maxFailedLoginAttempts: 2 });
+    await apiPatch(asUser('ADMIN'), {});
+
+    expect(events()).toHaveLength(0);
   });
 });
