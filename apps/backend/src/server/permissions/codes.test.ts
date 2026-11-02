@@ -2,13 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { PERMISSIONS, ROLES } from './codes';
 
 describe('permission and role constants', () => {
-  it('define the 16 permission codes including optional TOTP recovery, each exactly once', () => {
+  it('define the 23 permission codes (16 of Module 1, 7 of Module 2), each exactly once', () => {
     const codes = Object.values(PERMISSIONS);
 
-    expect(codes).toHaveLength(16);
-    expect(new Set(codes).size).toBe(16);
+    expect(codes).toHaveLength(23);
+    expect(new Set(codes).size).toBe(23);
     expect([...codes].sort()).toEqual(
       [
+        'honeytokens:read',
+        'honeytokens:test',
+        'ip-blocks:clear',
+        'ip-blocks:read',
+        'security-events:acknowledge',
+        'security-events:read',
         'security-settings:read',
         'security-settings:update',
         'tickets:assign',
@@ -24,6 +30,7 @@ describe('permission and role constants', () => {
         'users:read',
         'users:reset-password',
         'users:reset-totp',
+        'users:unlock',
         'users:update',
       ].sort(),
     );

@@ -400,9 +400,9 @@ describe('POST /api/auth/login: rate limiting hook', () => {
     expect(response.headers.getSetCookie()).toHaveLength(0);
   });
 
-  it('keys the limiter on the first forwarded address, but only behind a trusted proxy', async () => {
+  it('keys the limiter on the address the trusted proxy appended, but only behind a trusted proxy', async () => {
     const check = vi.spyOn(loginRateLimiter, 'check');
-    const forwarded = { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' };
+    const forwarded = { 'x-forwarded-for': '10.0.0.1, 203.0.113.7' };
 
     vi.stubEnv('TRUST_PROXY', 'true');
     await post({ login: 'Employee1', password: PASSWORD }, forwarded);

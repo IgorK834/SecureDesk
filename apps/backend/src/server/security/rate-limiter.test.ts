@@ -59,12 +59,13 @@ describe('SlidingWindowRateLimiter (SEC-27)', () => {
 describe('getClientIp', () => {
   const request = () =>
     new NextRequest('http://localhost/api/auth/login', {
-      headers: { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' },
+      headers: { 'x-forwarded-for': '1.2.3.4, 198.51.100.7' },
     });
 
-  it('uses only the first forwarded address when TRUST_PROXY=true', () => {
+  it('keys on the address the trusted proxy appended, never on the leftmost, client-set one', () => {
     vi.stubEnv('TRUST_PROXY', 'true');
-    expect(getClientIp(request())).toBe('203.0.113.7');
+    vi.stubEnv('TRUSTED_PROXY_HOPS', '1');
+    expect(getClientIp(request())).toBe('198.51.100.7');
   });
 
   it('ignores a spoofable forwarded address unless the proxy is trusted', () => {

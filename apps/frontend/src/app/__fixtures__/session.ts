@@ -30,6 +30,13 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'users:reset-totp',
     'security-settings:read',
     'security-settings:update',
+    'security-events:read',
+    'security-events:acknowledge',
+    'users:unlock',
+    'ip-blocks:read',
+    'ip-blocks:clear',
+    'honeytokens:read',
+    'honeytokens:test',
   ],
   MANAGER: [
     'tickets:create',

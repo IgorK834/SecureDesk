@@ -19,6 +19,10 @@ const LIMITS = {
   minPasswordLength: { min: 12, max: 128 },
   passwordMaxAgeDays: { min: 1, max: 3650 },
   sessionIdleTimeoutMinutes: { min: 1, max: 1440 },
+  maxFailedLoginAttempts: { min: 3, max: 20 },
+  ipFailedAttemptLimit: { min: 5, max: 500 },
+  sprayingDistinctLoginThreshold: { min: 3, max: 50 },
+  securityEventRetentionDays: { min: 7, max: 365 },
 } as const;
 type NumberField = keyof typeof LIMITS;
 
@@ -51,14 +55,40 @@ const MESSAGES: Record<NumberField, Record<string, string>> = {
     min: `Use at least ${LIMITS.sessionIdleTimeoutMinutes.min} minute.`,
     max: `Use at most ${LIMITS.sessionIdleTimeoutMinutes.max} minutes.`,
   },
+  maxFailedLoginAttempts: {
+    required: 'Enter a number of attempts.',
+    integer: 'Use a whole number.',
+    min: `Use at least ${LIMITS.maxFailedLoginAttempts.min} attempts.`,
+    max: `Use at most ${LIMITS.maxFailedLoginAttempts.max} attempts.`,
+  },
+  ipFailedAttemptLimit: {
+    required: 'Enter a number of attempts.',
+    integer: 'Use a whole number.',
+    min: `Use at least ${LIMITS.ipFailedAttemptLimit.min} attempts.`,
+    max: `Use at most ${LIMITS.ipFailedAttemptLimit.max} attempts.`,
+  },
+  sprayingDistinctLoginThreshold: {
+    required: 'Enter a number of logins.',
+    integer: 'Use a whole number.',
+    min: `Use at least ${LIMITS.sprayingDistinctLoginThreshold.min} logins.`,
+    max: `Use at most ${LIMITS.sprayingDistinctLoginThreshold.max} logins.`,
+  },
+  securityEventRetentionDays: {
+    required: 'Enter a number of days.',
+    integer: 'Use a whole number.',
+    min: `Use at least ${LIMITS.securityEventRetentionDays.min} days.`,
+    max: `Use at most ${LIMITS.securityEventRetentionDays.max} days.`,
+  },
 };
 
 /**
- * The global security settings (routed at `/admin/security`): password rules, password expiry
- * and the idle timeout. Saving sends all four values and shows what the server stored. Which
- * rule applies when is said next to each field, because it differs: a new idle timeout reaches
- * sessions that are open now, a new maximum age applies at the next sign-in, the password rules
- * at the next password change.
+ * The global security settings (routed at `/admin/security`): password rules, password expiry,
+ * the idle timeout and the login protection (failed-attempt limits and event retention). Saving
+ * sends all eight values and shows what the server stored. Which rule applies when is said next to
+ * each field, because it differs: a new idle timeout reaches sessions that are open now, a new
+ * maximum age applies at the next sign-in, the password rules at the next password change, and the
+ * login-protection limits at the next login attempt (or, for the retention, the next purge). The
+ * lock duration and the attempt window are fixed by the assignment, so they are text, not fields.
  */
 @Component({
   selector: 'app-security-settings',
@@ -152,6 +182,96 @@ const MESSAGES: Record<NumberField, Record<string, string>> = {
           }
         </div>
 
+        <fieldset class="group">
+          <legend>Login protection</legend>
+          <p class="hint">Lock duration: 15 minutes · attempt window: 15 minutes</p>
+
+          <div class="field">
+            <label for="max-failed-attempts">Failed attempts before an account is locked</label>
+            <input
+              id="max-failed-attempts"
+              type="number"
+              formControlName="maxFailedLoginAttempts"
+              [attr.aria-invalid]="message('maxFailedLoginAttempts') ? true : null"
+              [attr.aria-describedby]="
+                message('maxFailedLoginAttempts')
+                  ? 'max-failed-attempts-hint max-failed-attempts-error'
+                  : 'max-failed-attempts-hint'
+              "
+            />
+            <p id="max-failed-attempts-hint" class="hint">
+              Failed attempts for one login within the window, from 3 to 20. Applies to the next
+              login attempt.
+            </p>
+            @if (message('maxFailedLoginAttempts'); as text) {
+              <p id="max-failed-attempts-error" class="error">{{ text }}</p>
+            }
+          </div>
+
+          <div class="field">
+            <label for="ip-limit">Failed attempts before an IP address is blocked</label>
+            <input
+              id="ip-limit"
+              type="number"
+              formControlName="ipFailedAttemptLimit"
+              [attr.aria-invalid]="message('ipFailedAttemptLimit') ? true : null"
+              [attr.aria-describedby]="
+                message('ipFailedAttemptLimit') ? 'ip-limit-hint ip-limit-error' : 'ip-limit-hint'
+              "
+            />
+            <p id="ip-limit-hint" class="hint">
+              Failed attempts from one address within the window, whatever the logins, from 5 to
+              500. Applies to the next login attempt.
+            </p>
+            @if (message('ipFailedAttemptLimit'); as text) {
+              <p id="ip-limit-error" class="error">{{ text }}</p>
+            }
+          </div>
+
+          <div class="field">
+            <label for="spraying-threshold">Distinct logins that signal password spraying</label>
+            <input
+              id="spraying-threshold"
+              type="number"
+              formControlName="sprayingDistinctLoginThreshold"
+              [attr.aria-invalid]="message('sprayingDistinctLoginThreshold') ? true : null"
+              [attr.aria-describedby]="
+                message('sprayingDistinctLoginThreshold')
+                  ? 'spraying-threshold-hint spraying-threshold-error'
+                  : 'spraying-threshold-hint'
+              "
+            />
+            <p id="spraying-threshold-hint" class="hint">
+              Different logins failed from one address within the window, from 3 to 50, raise a
+              security event. Applies to the next login attempt.
+            </p>
+            @if (message('sprayingDistinctLoginThreshold'); as text) {
+              <p id="spraying-threshold-error" class="error">{{ text }}</p>
+            }
+          </div>
+
+          <div class="field">
+            <label for="event-retention">Security event retention (days)</label>
+            <input
+              id="event-retention"
+              type="number"
+              formControlName="securityEventRetentionDays"
+              [attr.aria-invalid]="message('securityEventRetentionDays') ? true : null"
+              [attr.aria-describedby]="
+                message('securityEventRetentionDays')
+                  ? 'event-retention-hint event-retention-error'
+                  : 'event-retention-hint'
+              "
+            />
+            <p id="event-retention-hint" class="hint">
+              Days a security event is kept, from 7 to 365. Applies at the next clean-up.
+            </p>
+            @if (message('securityEventRetentionDays'); as text) {
+              <p id="event-retention-error" class="error">{{ text }}</p>
+            }
+          </div>
+        </fieldset>
+
         @if (formError(); as text) {
           <p role="alert" aria-live="assertive" class="error">{{ text }}</p>
         }
@@ -171,6 +291,10 @@ const MESSAGES: Record<NumberField, Record<string, string>> = {
       flex-direction: column;
       margin-block: 0.75em;
       max-width: 28em;
+    }
+    .group {
+      margin-block: 1em;
+      max-width: 30em;
     }
     .hint {
       margin: 0.25em 0 0;
@@ -197,6 +321,18 @@ export class SecuritySettingsComponent {
     }),
     sessionIdleTimeoutMinutes: new FormControl<number | null>(null, {
       validators: [wholeNumberWithin('sessionIdleTimeoutMinutes')],
+    }),
+    maxFailedLoginAttempts: new FormControl<number | null>(null, {
+      validators: [wholeNumberWithin('maxFailedLoginAttempts')],
+    }),
+    ipFailedAttemptLimit: new FormControl<number | null>(null, {
+      validators: [wholeNumberWithin('ipFailedAttemptLimit')],
+    }),
+    sprayingDistinctLoginThreshold: new FormControl<number | null>(null, {
+      validators: [wholeNumberWithin('sprayingDistinctLoginThreshold')],
+    }),
+    securityEventRetentionDays: new FormControl<number | null>(null, {
+      validators: [wholeNumberWithin('securityEventRetentionDays')],
     }),
   });
 
@@ -254,6 +390,10 @@ export class SecuritySettingsComponent {
         rejectPersonalDataInPassword: value.rejectPersonalDataInPassword,
         passwordMaxAgeDays: value.maxAgeDisabled ? null : (value.passwordMaxAgeDays as number),
         sessionIdleTimeoutMinutes: value.sessionIdleTimeoutMinutes as number,
+        maxFailedLoginAttempts: value.maxFailedLoginAttempts as number,
+        ipFailedAttemptLimit: value.ipFailedAttemptLimit as number,
+        sprayingDistinctLoginThreshold: value.sprayingDistinctLoginThreshold as number,
+        securityEventRetentionDays: value.securityEventRetentionDays as number,
       })
       .subscribe({
         next: (saved) => {
@@ -277,6 +417,10 @@ export class SecuritySettingsComponent {
       maxAgeDisabled: settings.passwordMaxAgeDays === null,
       passwordMaxAgeDays: settings.passwordMaxAgeDays,
       sessionIdleTimeoutMinutes: settings.sessionIdleTimeoutMinutes,
+      maxFailedLoginAttempts: settings.maxFailedLoginAttempts,
+      ipFailedAttemptLimit: settings.ipFailedAttemptLimit,
+      sprayingDistinctLoginThreshold: settings.sprayingDistinctLoginThreshold,
+      securityEventRetentionDays: settings.securityEventRetentionDays,
     });
   }
 }

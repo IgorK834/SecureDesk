@@ -449,6 +449,10 @@ describe('the security settings page, wired to the real HTTP client', () => {
     rejectPersonalDataInPassword: false,
     passwordMaxAgeDays: null,
     sessionIdleTimeoutMinutes: 15,
+    maxFailedLoginAttempts: 5,
+    ipFailedAttemptLimit: 20,
+    sprayingDistinctLoginThreshold: 8,
+    securityEventRetentionDays: 90,
   };
   type App = Awaited<ReturnType<typeof startApp>>;
   const root = (app: App) => app.harness.routeNativeElement as HTMLElement;
@@ -470,7 +474,7 @@ describe('the security settings page, wired to the real HTTP client', () => {
     expect(field(app, 'idle-timeout').value).toBe('15');
   });
 
-  it('saves with one PATCH carrying all four values, then shows what the server stored', async () => {
+  it('saves with one PATCH carrying all eight values, then shows what the server stored', async () => {
     const app = await startApp(meResponse('ADMINISTRATOR'));
     await app.open('/admin/security');
     app.harness.detectChanges();
@@ -492,6 +496,10 @@ describe('the security settings page, wired to the real HTTP client', () => {
       rejectPersonalDataInPassword: true,
       passwordMaxAgeDays: null,
       sessionIdleTimeoutMinutes: 15,
+      maxFailedLoginAttempts: 5,
+      ipFailedAttemptLimit: 20,
+      sprayingDistinctLoginThreshold: 8,
+      securityEventRetentionDays: 90,
     });
     patch.flush({ ...SETTINGS, minPasswordLength: 16, rejectPersonalDataInPassword: true });
     await app.render();

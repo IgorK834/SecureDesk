@@ -8,3 +8,7 @@ export * from './password-history';
 export * from './sessions';
 export * from './security-settings';
 export * from './tickets';
+export * from './login-attempts';
+export * from './honeytokens';
+export * from './security-events';
+export * from './captcha-challenges';

@@ -124,10 +124,35 @@ body and `Retry-After` do not disclose account existence. A successful login doe
 failure window. Separating the second key by address prevents one remote address from locking a
 victim out everywhere.
 
-The first `X-Forwarded-For` value is trusted only when `TRUST_PROXY=true`; otherwise a
-client-supplied forwarding header is ignored. The store is an in-memory `Map`, so it is
-**per-process and lost on restart**. A horizontally scaled or restart-resilient deployment must
-replace it with a shared, atomic store such as Redis.
+The store is an in-memory `Map`, so it is **per-process and lost on restart**. A horizontally
+scaled or restart-resilient deployment must replace it with a shared, atomic store such as Redis.
+(Module 2 replaces this limiter for login with SQLite-backed tracking; see the backlog.)
+
+### Client address
+
+Every per-address limit is only as good as the address it keys on, so `getClientIp()` in
+`server/security/rate-limiter.ts` delegates to `server/security/client-ip.ts`
+(`resolveClientIp()` returns `{ raw, key }`):
+
+- Without `TRUST_PROXY=true` the forwarding headers are ignored entirely and every request gets the
+  fixed key `unknown`. In production the server logs a start-up warning for this
+  (`src/instrumentation.ts`), because all clients then share one bucket.
+- With `TRUST_PROXY=true` the address is the entry `TRUSTED_PROXY_HOPS` places from the **right** of
+  `X-Forwarded-For` (default 1), never the leftmost one: the left part is written by the client, the
+  right end by our own proxy. `X-Forwarded-For: 1.2.3.4, 198.51.100.7` with one hop is
+  `198.51.100.7`, and rotating the forged left part never changes the key. A value that is not a
+  valid IP (`net.isIP`; ports, brackets, zone ids and names are refused), a missing header or one
+  with fewer entries than hops gives `unknown`; nothing throws.
+- IPv4-mapped IPv6 (`::ffff:203.0.113.5`) is the same address as its IPv4 form. The `key` of an IPv6
+  address is its /64 prefix (`2001:db8:1:2::/64`), so a client cannot rotate through the addresses of
+  its own subnet; `raw` keeps the full normalized address.
+
+**Deployment rule:** the edge reverse proxy must **overwrite** `X-Forwarded-For` with the address
+it saw, not append to what the client sent. Each further trusted proxy in a chain appends, and
+`TRUSTED_PROXY_HOPS` is the number of such proxies. Reaching the backend directly (without the
+proxy) while `TRUST_PROXY=true` lets a client choose its own address. In development the Angular
+dev-server proxy sets `xfwd: true` (`apps/frontend/proxy.conf.json`) and `.env.example` sets
+`TRUST_PROXY=true`, `TRUSTED_PROXY_HOPS=1`, so local per-IP tests see a real address.
 
 ## CSRF protection
 
@@ -506,17 +531,21 @@ authoritative server-side checks inside the password-change transaction.
 `app/api/admin/security-settings/route.ts`, Administrator only: `FULLY_AUTHENTICATED` plus one
 permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `401`.
 
-| Endpoint                             | Permission                 | Answer                                 |
-| ------------------------------------ | -------------------------- | -------------------------------------- |
-| `GET /api/admin/security-settings`   | `security-settings:read`   | `200` the four settings                |
-| `PATCH /api/admin/security-settings` | `security-settings:update` | `200` all four settings, as now stored |
+| Endpoint                             | Permission                 | Answer                                  |
+| ------------------------------------ | -------------------------- | --------------------------------------- |
+| `GET /api/admin/security-settings`   | `security-settings:read`   | `200` the eight settings                |
+| `PATCH /api/admin/security-settings` | `security-settings:update` | `200` all eight settings, as now stored |
 
-| Setting                        | Allowed values                         | Default |
-| ------------------------------ | -------------------------------------- | ------- |
-| `minPasswordLength`            | whole number, 12 to 128                | 12      |
-| `rejectPersonalDataInPassword` | `true` or `false`                      | `false` |
-| `passwordMaxAgeDays`           | whole number, 1 to 3650, or `null`: no | `null`  |
-| `sessionIdleTimeoutMinutes`    | whole number, 1 to 1440                | 15      |
+| Setting                          | Allowed values                         | Default |
+| -------------------------------- | -------------------------------------- | ------- |
+| `minPasswordLength`              | whole number, 12 to 128                | 12      |
+| `rejectPersonalDataInPassword`   | `true` or `false`                      | `false` |
+| `passwordMaxAgeDays`             | whole number, 1 to 3650, or `null`: no | `null`  |
+| `sessionIdleTimeoutMinutes`      | whole number, 1 to 1440                | 15      |
+| `maxFailedLoginAttempts`         | whole number, 3 to 20                  | 5       |
+| `ipFailedAttemptLimit`           | whole number, 5 to 500                 | 20      |
+| `sprayingDistinctLoginThreshold` | whole number, 3 to 50                  | 8       |
+| `securityEventRetentionDays`     | whole number, 7 to 365                 | 90      |
 
 - **PATCH takes any non-empty subset** (`SecuritySettingsPatch`, `server/security/schemas.ts`). An
   unknown key (including `updatedBy` or `id`), an empty body, a wrong type or an out-of-range value
@@ -530,6 +559,16 @@ permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `
   only the named columns change, and a database without the row (which reads as the defaults) gets
   it created. The table stamps `updated_at` on insert and on every update, and `updated_by` is the
   administrator who made the change. Only the latest change is kept, not a history of changes.
+- **Login protection (Module 2, Task 7.4).** The last four settings are the failed-attempt limit
+  per login (B-01), the limit per IP address, the distinct-login threshold that raises a
+  password-spraying event, and the retention of security events (see
+  [Security events, alerts and data retention](#security-events-alerts-and-data-retention)). Zod
+  and the `CHECK` constraints of `security_settings` hold the same ranges, so a limit of 2 or 21
+  failed attempts is a `400` and, without Zod in front, a `SQLITE_CONSTRAINT_CHECK`. The lock
+  duration and the attempt window are not settings: the assignment fixes both at 15 minutes. Each
+  change is recorded as a `SECURITY_SETTINGS_CHANGED` security event that names the changed keys and
+  the administrator, never the values. Whatever reads a setting (the lockout, the IP limit, the
+  purge) calls `readSecuritySettings` on each use, so a new limit applies to the very next attempt.
 - **Persisted.** The values are rows in the database file, so a restart of the backend returns what
   was saved (`settings-service.test.ts` closes a file database and reopens it).
 
@@ -546,14 +585,61 @@ session lifetime ends the session first.
 
 - **Screen** (`features/admin-security/security-settings.component.ts`, routed at
   `/admin/security`): a reactive form with a switch for the personal-data rule, number inputs, and
-  a "Disabled" checkbox for the maximum age (it sends `null` and switches the field off). Each
+  a "Disabled" checkbox for the maximum age (it sends `null` and switches the field off), and a
+  "Login protection" group with four number inputs and the read-only text "Lock duration: 15
+  minutes · attempt window: 15 minutes". Each
   field says when its setting takes effect. The limits are checked in the browser as a
-  convenience, mirroring the server's, and Save sends all four values and then shows what the
+  convenience, mirroring the server's, and Save sends all eight values and then shows what the
   server stored. The server's `400` carries no field, so it is shown as one message for the whole
   form, not under a field. Someone who may read the settings but not update them sees the form
   disabled and no Save button.
 - **CSRF.** `PATCH` uses the same origin and session-bound XSRF checks as every other
   state-changing route.
+
+## Security events, alerts and data retention
+
+Module 2 adds one persistent, typed, redacted record of security-relevant happenings (lockouts, bot
+detections, honeytoken hits), next to the operational log of `server/security/log-event.ts`, which
+stays as it is: an event name and a request id.
+
+**Recording** (`server/security/events.ts`). `SECURITY_EVENTS` is the registry: every event type has
+a fixed severity (`INFO`, `WARNING`, `CRITICAL`) and a strict Zod schema for its `details`.
+`recordSecurityEvent(db, input)` inserts the row synchronously and returns its id.
+
+- **Redaction guard.** An event whose `details` hold an undeclared key, or any key (at any depth)
+  matching `/password|token|secret|answer|captcha/i`, is refused: it throws outside production (so a
+  mistake is found in development and tests) and is dropped in production (so it never fails a
+  request). The message names the key, never a value. The user agent is cut to 200 characters.
+- **Aggregation.** The noisy types (`CAPTCHA_FAILED`, `HONEYPOT_TRIGGERED`, `LOGIN_IP_BLOCKED`) go
+  through `recordAggregated`: one row per type, address key and 5-minute bucket, with the count in
+  `details.count`, so a bot cannot flood the table (1000 identical events are one row with
+  `count = 1000`).
+- **Alerts** (`server/security/alerts.ts`). An `AlertDispatcher` is `{ id, send(event) }` and is
+  registered in a small registry. A type that asks for an alert (the two `CRITICAL` honeytoken
+  types) is stored with `alert_status = PENDING`, handed to every dispatcher **in the background**
+  under a hard timeout (3 s), and `alert_status` and `alert_attempted_at` are written back:
+  `SENT`, `SUPPRESSED` (a deliberate duplicate suppression) or `FAILED`. A dispatcher that throws,
+  rejects or hangs only makes the status `FAILED`. The event is stored before anything is
+  dispatched and the caller never waits, so an alert channel can neither fail a request nor lose an
+  event. Dispatchers receive the event without the user agent, and never anything outside the
+  declared `details`.
+
+**Retention and GDPR.** An IP address and a user agent are personal data (GDPR), and so is a login
+name that somebody typed. They are kept only as long as they serve the defence:
+
+| Table                | Kept for                                                                                                       | Why                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `login_attempts`     | 24 hours                                                                                                       | The counters only look at a 15-minute window; the rest is room for investigation |
+| `captcha_challenges` | 1 hour (they are valid for 2 minutes)                                                                          | Single use, then useless                                                         |
+| `security_events`    | `security_event_retention_days` (default 90, 7 to 365); an unacknowledged `CRITICAL` event up to twice as long | The audit trail; a honeytoken hit nobody has looked at must not expire unread    |
+
+`server/maintenance/purge.ts` does the deleting. `purgeExpired(db)` deletes exactly the rows past
+their horizon (with the injected clock, so the boundaries are tested). `purgeIfDue(db)` runs it
+from the write path (every recorded event calls it) at most once every 5 minutes per database, never
+throws, and so needs no scheduler. `npm run maintenance:purge` runs it once from the command line,
+for example from cron. Nothing in this module stores a password, hash, token, CAPTCHA response or
+answer; the administrator can shorten the retention, and an address that must be erased sooner can
+be deleted from `security_events` by hand.
 
 ## HTTP response hardening and deployment
 

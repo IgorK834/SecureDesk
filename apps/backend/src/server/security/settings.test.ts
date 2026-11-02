@@ -12,7 +12,7 @@ beforeEach(() => {
 afterEach(() => db.$client.close());
 
 describe('readSecuritySettings', () => {
-  it('returns the stored values, and only the four settings (not who changed them or when)', () => {
+  it('returns the stored values, and only the eight settings (not who changed them or when)', () => {
     db.insert(securitySettings)
       .values({
         id: 1,
@@ -20,6 +20,10 @@ describe('readSecuritySettings', () => {
         rejectPersonalDataInPassword: true,
         passwordMaxAgeDays: 30,
         sessionIdleTimeoutMinutes: 5,
+        maxFailedLoginAttempts: 3,
+        ipFailedAttemptLimit: 50,
+        sprayingDistinctLoginThreshold: 10,
+        securityEventRetentionDays: 30,
       })
       .run();
 
@@ -28,6 +32,10 @@ describe('readSecuritySettings', () => {
       rejectPersonalDataInPassword: true,
       passwordMaxAgeDays: 30,
       sessionIdleTimeoutMinutes: 5,
+      maxFailedLoginAttempts: 3,
+      ipFailedAttemptLimit: 50,
+      sprayingDistinctLoginThreshold: 10,
+      securityEventRetentionDays: 30,
     });
   });
 
@@ -63,12 +71,16 @@ describe('DEFAULT_SECURITY_SETTINGS', () => {
     expect(readSecuritySettings(db)).toStrictEqual(DEFAULT_SECURITY_SETTINGS);
   });
 
-  it('states the variant-2 values: 12 characters, no personal-data rule, no expiry, 15 minutes idle', () => {
+  it('states the variant-2 values: 12 characters, no personal-data rule, no expiry, 15 minutes idle, and the Module 2 login protection', () => {
     expect(DEFAULT_SECURITY_SETTINGS).toStrictEqual({
       minPasswordLength: 12,
       rejectPersonalDataInPassword: false,
       passwordMaxAgeDays: null,
       sessionIdleTimeoutMinutes: 15,
+      maxFailedLoginAttempts: 5,
+      ipFailedAttemptLimit: 20,
+      sprayingDistinctLoginThreshold: 8,
+      securityEventRetentionDays: 90,
     });
   });
 });

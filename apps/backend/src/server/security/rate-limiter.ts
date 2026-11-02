@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import type { Clock } from '../time/clock';
+import { resolveClientIp } from './client-ip';
 
 export type RateLimitDecision = { allowed: true } | { allowed: false; retryAfterSeconds: number };
 
@@ -50,13 +51,10 @@ export class SlidingWindowRateLimiter {
   }
 }
 
-/** Trust proxy-supplied client addresses only in deployments that explicitly enable it. */
+/**
+ * The key limits and counters use for a request. See `client-ip.ts` for how it is resolved: the
+ * forwarding header is trusted only behind a configured proxy, and only from the right.
+ */
 export function getClientIp(request: NextRequest): string {
-  if (process.env.TRUST_PROXY === 'true') {
-    const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-    if (forwarded) return forwarded;
-  }
-  // NextRequest does not expose the direct socket address. A trusted reverse proxy should be
-  // enabled in deployed environments; this fallback deliberately ignores spoofable headers.
-  return 'unknown';
+  return resolveClientIp(request.headers).key;
 }

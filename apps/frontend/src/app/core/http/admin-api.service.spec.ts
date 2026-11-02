@@ -192,6 +192,10 @@ describe('AdminApi: security settings', () => {
     rejectPersonalDataInPassword: false,
     passwordMaxAgeDays: null,
     sessionIdleTimeoutMinutes: 15,
+    maxFailedLoginAttempts: 5,
+    ipFailedAttemptLimit: 20,
+    sprayingDistinctLoginThreshold: 8,
+    securityEventRetentionDays: 90,
   };
 
   it('getSecuritySettings: GET /api/admin/security-settings', () => {
@@ -207,7 +211,7 @@ describe('AdminApi: security settings', () => {
     http.verify();
   });
 
-  it('updateSecuritySettings: PATCH exactly the settings it is given, and returns all four', () => {
+  it('updateSecuritySettings: PATCH exactly the settings it is given, and returns all eight', () => {
     const { api, http } = setUp();
     let result;
     api.updateSecuritySettings({ minPasswordLength: 16 }).subscribe((r) => (result = r));
@@ -228,6 +232,29 @@ describe('AdminApi: security settings', () => {
     const request = http.expectOne('/api/admin/security-settings');
 
     expect(JSON.stringify(request.request.body)).toBe('{"passwordMaxAgeDays":null}');
+    http.verify();
+  });
+
+  it('sends the login-protection settings under the names the server expects', () => {
+    const { api, http } = setUp();
+    api
+      .updateSecuritySettings({
+        maxFailedLoginAttempts: 7,
+        ipFailedAttemptLimit: 50,
+        sprayingDistinctLoginThreshold: 12,
+        securityEventRetentionDays: 30,
+      })
+      .subscribe();
+
+    const request = http.expectOne('/api/admin/security-settings');
+
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toStrictEqual({
+      maxFailedLoginAttempts: 7,
+      ipFailedAttemptLimit: 50,
+      sprayingDistinctLoginThreshold: 12,
+      securityEventRetentionDays: 30,
+    });
     http.verify();
   });
 

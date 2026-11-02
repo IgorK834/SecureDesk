@@ -7,6 +7,9 @@ erDiagram
     users |o--o{ security_settings : "updated_by"
     users ||--o{ tickets : "created_by_user_id"
     users |o--o{ tickets : "assigned_to_user_id"
+    users |o--o{ security_events : "user_id"
+    users |o--o{ security_events : "acknowledged_by"
+    honeytokens |o--o{ security_events : "honeytoken_id"
 
     roles {
         TEXT id PK "stable key"
@@ -63,6 +66,10 @@ erDiagram
         INTEGER reject_personal_data_in_password
         INTEGER password_max_age_days
         INTEGER session_idle_timeout_minutes
+        INTEGER max_failed_login_attempts
+        INTEGER ip_failed_attempt_limit
+        INTEGER spraying_distinct_login_threshold
+        INTEGER security_event_retention_days
         INTEGER updated_at
         TEXT updated_by FK
     }
@@ -75,4 +82,50 @@ erDiagram
         TEXT assigned_to_user_id FK
         INTEGER created_at
         INTEGER updated_at
+    }
+    login_attempts {
+        TEXT id PK
+        TEXT login_normalized
+        TEXT ip_key
+        TEXT kind
+        TEXT outcome
+        INTEGER occurred_at
+        INTEGER resolved_at
+    }
+    security_events {
+        TEXT id PK
+        TEXT type
+        TEXT severity
+        INTEGER occurred_at
+        TEXT ip_key
+        TEXT user_agent
+        TEXT login_normalized
+        TEXT user_id FK
+        TEXT honeytoken_id FK
+        TEXT details
+        TEXT request_id
+        INTEGER acknowledged_at
+        TEXT acknowledged_by FK
+        TEXT alert_status
+        INTEGER alert_attempted_at
+    }
+    honeytokens {
+        TEXT id PK
+        TEXT kind
+        TEXT label
+        TEXT login_normalized UK
+        TEXT alert_url_env
+        INTEGER enabled
+        INTEGER created_at
+        INTEGER last_triggered_at
+        INTEGER trigger_count
+    }
+    captcha_challenges {
+        TEXT id PK
+        TEXT purpose
+        TEXT answer_mac
+        INTEGER created_at
+        INTEGER expires_at
+        INTEGER consumed_at
+        TEXT ip_key
     }
