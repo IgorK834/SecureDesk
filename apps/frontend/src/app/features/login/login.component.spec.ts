@@ -16,10 +16,14 @@ const response = (stage: AuthStage = 'FULLY_AUTHENTICATED'): LoginResponse => {
   return { user: me.user, authStage: stage, mustChangePassword: me.mustChangePassword };
 };
 
-function failure(status: number, code: string): HttpErrorResponse {
+function failure(
+  status: number,
+  code: string,
+  details?: Record<string, unknown>,
+): HttpErrorResponse {
   return new HttpErrorResponse({
     status,
-    error: { error: { code, message: 'server text is not rendered' } },
+    error: { error: { code, message: 'server text is not rendered', details } },
   });
 }
 
@@ -113,6 +117,90 @@ describe('LoginComponent', () => {
       'Too many attempts, try again later',
     );
     expect((root.querySelector('#password') as HTMLInputElement).value).toBe('');
+  });
+
+  it('counts an account lock down from server seconds using monotonic elapsed time', () => {
+    vi.useFakeTimers();
+    try {
+      const { api, fixture, root, valid } = setup(
+        throwError(() =>
+          failure(429, 'AUTH_ACCOUNT_LOCKED', {
+            retryAfterSeconds: 872,
+            lockedUntil: '2026-03-10T12:15:00.000Z',
+          }),
+        ),
+      );
+      valid();
+      const button = root.querySelector('button[type="submit"]') as HTMLButtonElement;
+
+      button.click();
+      fixture.detectChanges();
+      const visible = () => root.querySelector('[role="alert"] [aria-hidden="true"]')?.textContent;
+      expect(visible()).toBe('Too many failed attempts. Try again in 14:32.');
+      expect(button.disabled).toBe(true);
+      root
+        .querySelector('#password')
+        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      expect(api.login).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(1000);
+      fixture.detectChanges();
+      expect(visible()).toContain('14:31');
+
+      vi.advanceTimersByTime(871_000);
+      fixture.detectChanges();
+      expect(visible()).toContain('00:00');
+      expect(button.disabled).toBe(false);
+      expect(root.querySelector('.visually-hidden')?.textContent).toBe('You can try again now');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses a distinct network-level countdown and never renders the server message', () => {
+    vi.useFakeTimers();
+    try {
+      const { fixture, root, valid } = setup(
+        throwError(() => failure(429, 'AUTH_IP_BLOCKED', { retryAfterSeconds: 42 })),
+      );
+      valid();
+
+      (root.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+
+      expect(root.querySelector('[aria-hidden="true"]')?.textContent).toBe(
+        'Too many attempts from this network. Try again in 00:42.',
+      );
+      expect(root.textContent).not.toContain('server text is not rendered');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps per-second visual updates out of the polite live announcement', () => {
+    vi.useFakeTimers();
+    try {
+      const { fixture, root, valid } = setup(
+        throwError(() => failure(429, 'AUTH_ACCOUNT_LOCKED', { retryAfterSeconds: 872 })),
+      );
+      valid();
+      (root.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      const live = () => root.querySelector('.visually-hidden')?.textContent;
+      const initial = live();
+
+      vi.advanceTimersByTime(1000);
+      fixture.detectChanges();
+      expect(live()).toBe(initial);
+
+      vi.advanceTimersByTime(31_000);
+      fixture.detectChanges();
+      expect(live()).toContain('14:00');
+      expect(root.querySelector('[role="alert"]')?.getAttribute('aria-live')).toBe('polite');
+      expect(root.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows a neutral availability message for a non-authentication failure', () => {
