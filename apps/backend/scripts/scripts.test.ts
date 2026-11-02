@@ -11,7 +11,11 @@ vi.setConfig({ testTimeout: 30_000 });
 const backendDir = path.resolve(__dirname, '..');
 const tsx = path.resolve(backendDir, '../../node_modules/.bin/tsx');
 
-function run(script: 'migrate' | 'reset-db', env: Record<string, string>, args: string[] = []) {
+function run(
+  script: 'migrate' | 'reset-db' | 'purge',
+  env: Record<string, string>,
+  args: string[] = [],
+) {
   const result = spawnSync(tsx, [path.join('scripts', `${script}.ts`), ...args], {
     cwd: backendDir,
     // Deliberately not inheriting process.env, so the developer's own .env cannot leak in.
@@ -30,9 +34,10 @@ beforeEach(() => {
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
 // `reset-db` needs to be told which database to reset; `migrate` takes no argument.
-const resetArgs = (script: 'migrate' | 'reset-db') => (script === 'reset-db' ? ['dev'] : []);
+const resetArgs = (script: 'migrate' | 'reset-db' | 'purge') =>
+  script === 'reset-db' ? ['dev'] : [];
 
-describe.each(['migrate', 'reset-db'] as const)(
+describe.each(['migrate', 'reset-db', 'purge'] as const)(
   '%s script refuses a bad configuration',
   (script) => {
     it('exits non-zero with a clear message when DATABASE_PATH is missing', () => {
@@ -77,6 +82,27 @@ describe('migrate script', () => {
     expect(out).toMatch(/db:migrate OK/);
     expect(status).toBe(0);
     expect(existsSync(file)).toBe(true);
+  });
+});
+
+describe('purge script', () => {
+  it('purges a migrated database, says how much it removed and exits 0', () => {
+    const file = path.join(tmp, 'data', 'dev.sqlite');
+    expect(run('migrate', { DATABASE_PATH: file }).status).toBe(0);
+
+    const { status, out } = run('purge', { DATABASE_PATH: file });
+
+    expect(out).toMatch(
+      /maintenance:purge OK - removed 0 login attempts, 0 CAPTCHA challenges, 0 security events/,
+    );
+    expect(status).toBe(0);
+  });
+
+  it('exits non-zero with a message on a database that was never migrated', () => {
+    const { status, out } = run('purge', { DATABASE_PATH: path.join(tmp, 'data', 'empty.sqlite') });
+
+    expect(status).toBe(1);
+    expect(out).toMatch(/maintenance:purge failed/);
   });
 });
 
