@@ -40,8 +40,7 @@ export function toProfile(
 /**
  * The account as the administrator's user management shows it. A strict allowlist, never a row:
  * there is no password hash, no `login_normalized` and no `deleted_at` (deleted accounts are not
- * listed at all). Whether the account is active, blocked or still owes its first password change
- * is derived from `isBlocked` and `mustChangePassword`.
+ * listed at all). The live failed-login lock is supplied by the persistent attempt tracker.
  */
 export interface AdminUserDto {
   id: string;
@@ -51,6 +50,8 @@ export interface AdminUserDto {
   /** The role code, e.g. `EMPLOYEE`. */
   role: string;
   isBlocked: boolean;
+  /** End of the failed-login lock, or null when the account may attempt credentials. */
+  lockedUntil: Date | null;
   mustChangePassword: boolean;
   /** When the current administrator-issued password stops working; null if there is none. */
   temporaryPasswordExpiresAt: Date | null;
@@ -76,7 +77,10 @@ export type AdminUserSource = Pick<
 >;
 
 /** Allowlist mapper like `toSafeUser`: every field is copied by name, so nothing else can leak. */
-export function toAdminUserDto(row: AdminUserSource): AdminUserDto {
+export function toAdminUserDto(
+  row: AdminUserSource,
+  lockedUntil: Date | null = null,
+): AdminUserDto {
   return {
     id: row.id,
     login: row.login,
@@ -84,6 +88,7 @@ export function toAdminUserDto(row: AdminUserSource): AdminUserDto {
     lastName: row.lastName,
     role: row.roleId.toUpperCase(),
     isBlocked: row.isBlocked,
+    lockedUntil,
     mustChangePassword: row.mustChangePassword,
     temporaryPasswordExpiresAt: row.temporaryPasswordExpiresAt,
     passwordChangedAt: row.passwordChangedAt,

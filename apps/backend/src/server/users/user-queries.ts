@@ -1,7 +1,10 @@
-import { type SQL, type SQLWrapper, and, asc, count, eq, isNull, or, sql } from 'drizzle-orm';
+import { type SQL, type SQLWrapper, and, asc, eq, isNull, or, sql } from 'drizzle-orm';
 import type { AppDb } from '../db/connection';
 import { users } from '../db/schema';
 import { NotFoundError } from '../http/errors';
+import { accountLockedUntil } from '../security/attempt-tracker';
+import { readSecuritySettings } from '../security/settings';
+import { clock } from '../time/clock';
 import { normalizeLogin } from './login';
 import { type AdminUserDto, toAdminUserDto } from './mappers';
 import { type RoleCode, type UserStatus, roleIdOf } from './schemas';
@@ -40,13 +43,11 @@ export function escapeLike(text: string): string {
 const containing = (column: SQLWrapper, text: string): SQL =>
   sql`${column} LIKE ${`%${escapeLike(text)}%`} ESCAPE '\\'`;
 
-// The three states partition the live accounts: a blocked account is "blocked" whether or not it
-// also owes a password change, so no account is in two filters.
-const STATUS_CONDITION: Record<UserStatus, SQL> = {
-  blocked: eq(users.isBlocked, true),
-  pending: and(eq(users.isBlocked, false), eq(users.mustChangePassword, true)) as SQL,
-  active: and(eq(users.isBlocked, false), eq(users.mustChangePassword, false)) as SQL,
-};
+function statusOf(user: AdminUserDto): UserStatus {
+  if (user.isBlocked) return 'blocked';
+  if (user.lockedUntil) return 'locked';
+  return user.mustChangePassword ? 'pending' : 'active';
+}
 
 export interface ListUsersInput {
   /** Matches the login, first name or last name. */
@@ -76,7 +77,6 @@ export function listUsers(
         )
       : undefined,
     role ? eq(users.roleId, roleIdOf(role)) : undefined,
-    status ? STATUS_CONDITION[status] : undefined,
   );
 
   const rows = db
@@ -84,15 +84,20 @@ export function listUsers(
     .from(users)
     .where(where)
     .orderBy(asc(users.loginNormalized), asc(users.id))
-    .limit(pageSize)
-    .offset((page - 1) * pageSize)
     .all();
-  // COUNT(*) always yields exactly one row.
-  const { total } = db.select({ total: count() }).from(users).where(where).get() as {
-    total: number;
-  };
+  const now = clock.now();
+  const maxAttempts = readSecuritySettings(db).maxFailedLoginAttempts;
+  const matching = rows
+    .map((row) =>
+      toAdminUserDto(
+        row,
+        accountLockedUntil(db, normalizeLogin(row.login), now, maxAttempts) ?? null,
+      ),
+    )
+    .filter((user) => !status || statusOf(user) === status);
+  const offset = (page - 1) * pageSize;
 
-  return { items: rows.map(toAdminUserDto), total };
+  return { items: matching.slice(offset, offset + pageSize), total: matching.length };
 }
 
 /** One account, or "not found" when there is none or it was deleted. */
@@ -103,5 +108,9 @@ export function getUser(db: QueryDb, id: string): AdminUserDto {
     .where(and(eq(users.id, id), isNull(users.deletedAt)))
     .get();
   if (!row) throw new NotFoundError();
-  return toAdminUserDto(row);
+  const maxAttempts = readSecuritySettings(db).maxFailedLoginAttempts;
+  return toAdminUserDto(
+    row,
+    accountLockedUntil(db, normalizeLogin(row.login), clock.now(), maxAttempts) ?? null,
+  );
 }

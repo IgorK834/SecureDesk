@@ -203,6 +203,7 @@ describe('getUser', () => {
         'lastName',
         'role',
         'isBlocked',
+        'lockedUntil',
         'mustChangePassword',
         'temporaryPasswordExpiresAt',
         'passwordChangedAt',

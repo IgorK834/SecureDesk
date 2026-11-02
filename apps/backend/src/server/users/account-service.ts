@@ -6,6 +6,8 @@ import type { AppDb, AppTransaction } from '../db/connection';
 import { ADMIN_LOGIN } from '../db/seeds/users';
 import { users } from '../db/schema';
 import { ApiError, NotFoundError } from '../http/errors';
+import { clearAccount } from '../security/attempt-tracker';
+import { recordSecurityEvent } from '../security/events';
 import { clock } from '../time/clock';
 import { normalizeLogin } from './login';
 import type { AdminUserDto } from './mappers';
@@ -91,6 +93,30 @@ export function unblockUser(db: AppDb, id: string): AdminUserDto {
     },
     { behavior: 'immediate' },
   );
+}
+
+/** Clears only the failed-login lock. The account's administrative block flag is untouched. */
+export function unlockUserLogin(
+  db: AppDb,
+  id: string,
+  actor: { adminId: string; requestId: string },
+): AdminUserDto {
+  const now = clock.now();
+  const result = db.transaction(
+    (tx) => {
+      const account = findLiveAccount(tx, id);
+      clearAccount(tx, account.loginNormalized, now);
+      return getUser(tx, id);
+    },
+    { behavior: 'immediate' },
+  );
+  recordSecurityEvent(db, {
+    type: 'ACCOUNT_UNLOCKED_BY_ADMIN',
+    requestId: actor.requestId,
+    userId: id,
+    details: { adminId: actor.adminId },
+  });
+  return result;
 }
 
 /**
