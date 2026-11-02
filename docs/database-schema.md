@@ -100,12 +100,12 @@ npm run db:migrate:test && npm run db:seed:test   # test database (NODE_ENV=test
 
 The seed (`src/server/db/seeds/`, entry point `scripts/seed.ts`) creates, in one transaction:
 
-| What                | Content                                                                                                                 |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Roles               | Administrator, Manager (Kierownik), Employee (Pracownik), Guest (Gość), with stable ids from `ROLES`                    |
-| Permissions         | the 16 codes of `PERMISSIONS`, linked to roles by the matrix in `src/server/permissions/matrix.ts` (22 links)           |
-| `security_settings` | the single row: minimum length 12, personal-data rule off, expiry disabled, idle timeout 15 minutes                     |
-| Accounts            | `ADMIN` (Administrator, System Administrator) plus `manager1`, `manager2`, `employee1`, `employee2`, `guest1`, `guest2` |
+| What                | Content                                                                                                                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Roles               | Administrator, Manager (Kierownik), Employee (Pracownik), Guest (Gość), with stable ids from `ROLES`                                                                                                      |
+| Permissions         | the 23 codes of `PERMISSIONS`, linked to roles by the matrix in `src/server/permissions/matrix.ts` (29 links)                                                                                             |
+| `security_settings` | the single row: minimum length 12, personal-data rule off, expiry disabled, idle timeout 15 minutes, lock after 5 failed logins, 20 failed attempts per IP, spraying threshold 8, event retention 90 days |
+| Accounts            | `ADMIN` (Administrator, System Administrator) plus `manager1`, `manager2`, `employee1`, `employee2`, `guest1`, `guest2`                                                                                   |
 
 Rules:
 
@@ -124,7 +124,7 @@ This seed creates six test accounts and is meant for development and review data
 
 ## Tables
 
-Seven tables hold identity, authorization and session state, and `tickets` (Task 3.3) holds the support tickets. Types below are SQLite storage classes: "boolean" columns hold `0`/`1`, and every timestamp is an `INTEGER` of **UTC epoch milliseconds** (`integer(..., { mode: 'timestamp_ms' })` in Drizzle).
+Seven tables hold identity, authorization and session state, `tickets` (Task 3.3) holds the support tickets, and four tables of Module 2 (Task 7.1) hold abuse-defence state: `login_attempts`, `security_events`, `honeytokens` and `captcha_challenges`. Types below are SQLite storage classes: "boolean" columns hold `0`/`1`, and every timestamp is an `INTEGER` of **UTC epoch milliseconds** (`integer(..., { mode: 'timestamp_ms' })` in Drizzle).
 
 ```mermaid
 erDiagram
@@ -136,6 +136,9 @@ erDiagram
     users |o--o{ security_settings : "updated_by"
     users ||--o{ tickets : "created_by_user_id"
     users |o--o{ tickets : "assigned_to_user_id"
+    users |o--o{ security_events : "user_id"
+    users |o--o{ security_events : "acknowledged_by"
+    honeytokens |o--o{ security_events : "honeytoken_id"
 
     roles {
         TEXT id PK "stable key, e.g. manager"
@@ -198,6 +201,10 @@ erDiagram
         INTEGER reject_personal_data_in_password "boolean, default 0"
         INTEGER password_max_age_days "nullable, NULL = disabled"
         INTEGER session_idle_timeout_minutes "default 15"
+        INTEGER max_failed_login_attempts "default 5, CHECK 3-20"
+        INTEGER ip_failed_attempt_limit "default 20, CHECK 5-500"
+        INTEGER spraying_distinct_login_threshold "default 8, CHECK 3-50"
+        INTEGER security_event_retention_days "default 90, CHECK 7-365"
         INTEGER updated_at "timestamp"
         TEXT updated_by FK "nullable"
     }
@@ -212,6 +219,56 @@ erDiagram
         INTEGER created_at "timestamp"
         INTEGER updated_at "timestamp"
     }
+
+    login_attempts {
+        TEXT id PK "UUID"
+        TEXT login_normalized "nullable, NULL for IP-level rows"
+        TEXT ip_key "client address, IPv6 as /64"
+        TEXT kind "CHECK: CREDENTIAL, CAPTCHA, HONEYPOT, MARKER"
+        TEXT outcome "CHECK: PENDING, FAILED, SUCCESS, CLEARED"
+        INTEGER occurred_at "timestamp"
+        INTEGER resolved_at "nullable timestamp"
+    }
+
+    security_events {
+        TEXT id PK "UUID"
+        TEXT type "event type from the registry"
+        TEXT severity "CHECK: INFO, WARNING, CRITICAL"
+        INTEGER occurred_at "timestamp"
+        TEXT ip_key "nullable"
+        TEXT user_agent "nullable, cut to 200 characters"
+        TEXT login_normalized "nullable"
+        TEXT user_id FK "nullable"
+        TEXT honeytoken_id FK "nullable"
+        TEXT details "JSON, validated per event type"
+        TEXT request_id
+        INTEGER acknowledged_at "nullable timestamp"
+        TEXT acknowledged_by FK "nullable"
+        TEXT alert_status "CHECK: NONE, PENDING, SENT, FAILED, SUPPRESSED; default NONE"
+        INTEGER alert_attempted_at "nullable timestamp"
+    }
+
+    honeytokens {
+        TEXT id PK "stable slug"
+        TEXT kind "CHECK: ACCOUNT_TRAP, AWS_KEYS"
+        TEXT label
+        TEXT login_normalized UK "nullable, account trap only"
+        TEXT alert_url_env "nullable, NAME of the env variable"
+        INTEGER enabled "boolean, default 1"
+        INTEGER created_at "timestamp"
+        INTEGER last_triggered_at "nullable timestamp"
+        INTEGER trigger_count "default 0"
+    }
+
+    captcha_challenges {
+        TEXT id PK "UUID"
+        TEXT purpose "login"
+        TEXT answer_mac "HMAC-SHA256, never the answer"
+        INTEGER created_at "timestamp"
+        INTEGER expires_at "timestamp"
+        INTEGER consumed_at "nullable timestamp"
+        TEXT ip_key "client address"
+    }
 ```
 
 A test (`schema/er-diagram.test.ts`) migrates an empty database and fails if this diagram disagrees with it about tables, columns, types, primary keys, unique columns or foreign keys, so the diagram cannot silently go stale.
@@ -223,24 +280,29 @@ The report-ready export is generated from [`database-schema.mmd`](database-schem
 
 ### Invariants and where they are enforced
 
-| Invariant                                               | Enforced by                                                                                                                            |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Exactly one role per user                               | `users.role_id` is `NOT NULL` with a foreign key to `roles.id`                                                                         |
-| A login is unique regardless of case or Unicode         | unique index on `users.login_normalized`, always filled with `normalizeLogin()` (`src/server/users/login.ts`)                          |
-| Credentials are hashed; TOTP is authenticated-encrypted | password/history and session tokens are hashes; `users.totp_secret_encrypted` is AES-256-GCM, never plaintext                          |
-| A session has one of four known auth stages             | `CHECK` on `sessions.auth_stage`                                                                                                       |
-| Sessions can be revoked without deleting them           | `sessions.revoked_at`                                                                                                                  |
-| One settings row; minimum password length never < 12    | `CHECK (id = 1)` and `CHECK (min_password_length >= 12)` on `security_settings`                                                        |
-| A ticket has one creator, at most one assignee          | `tickets.created_by_user_id` is `NOT NULL`; both it and the nullable `assigned_to_user_id` are foreign keys to `users.id`              |
-| A ticket has one of three known statuses                | `CHECK` on `tickets.status`                                                                                                            |
-| Who may read or change a ticket                         | not the database: `src/server/tickets/policy.ts` decides, see [permissions.md](permissions.md)                                         |
-| The permanent `ADMIN` account is protected              | triggers from migration `0001_protect_admin_account` (below) plus `assertNotProtectedAccount` in `src/server/users/account-service.ts` |
-| Accounts are never hard-deleted by the application      | soft delete through `users.deleted_at`; foreign keys from sessions and history keep pointing at a real row                             |
+| Invariant                                                   | Enforced by                                                                                                                            |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Exactly one role per user                                   | `users.role_id` is `NOT NULL` with a foreign key to `roles.id`                                                                         |
+| A login is unique regardless of case or Unicode             | unique index on `users.login_normalized`, always filled with `normalizeLogin()` (`src/server/users/login.ts`)                          |
+| Credentials are hashed; TOTP is authenticated-encrypted     | password/history and session tokens are hashes; `users.totp_secret_encrypted` is AES-256-GCM, never plaintext                          |
+| A session has one of four known auth stages                 | `CHECK` on `sessions.auth_stage`                                                                                                       |
+| Sessions can be revoked without deleting them               | `sessions.revoked_at`                                                                                                                  |
+| One settings row; minimum password length never < 12        | `CHECK (id = 1)` and `CHECK (min_password_length >= 12)` on `security_settings`                                                        |
+| A ticket has one creator, at most one assignee              | `tickets.created_by_user_id` is `NOT NULL`; both it and the nullable `assigned_to_user_id` are foreign keys to `users.id`              |
+| A ticket has one of three known statuses                    | `CHECK` on `tickets.status`                                                                                                            |
+| Login-attempt kind and outcome come from closed sets        | `CHECK` on `login_attempts.kind` and `login_attempts.outcome`                                                                          |
+| Event severity, alert status and honeytoken kind are closed | `CHECK` on `security_events.severity`, `security_events.alert_status` and `honeytokens.kind`                                           |
+| Login-protection settings stay in range                     | `CHECK ... BETWEEN` on the four Module 2 columns of `security_settings` (the ranges the API also enforces)                             |
+| An account-trap login belongs to one honeytoken             | unique index on `honeytokens.login_normalized`                                                                                         |
+| Who may read or change a ticket                             | not the database: `src/server/tickets/policy.ts` decides, see [permissions.md](permissions.md)                                         |
+| The permanent `ADMIN` account is protected                  | triggers from migration `0001_protect_admin_account` (below) plus `assertNotProtectedAccount` in `src/server/users/account-service.ts` |
+| Accounts are never hard-deleted by the application          | soft delete through `users.deleted_at`; foreign keys from sessions and history keep pointing at a real row                             |
 
 ### Notes
 
 - **IDs.** `users`, `sessions`, `password_history` and `tickets` use UUIDs generated by the application. `roles.id` and `permissions.id` are stable keys (a role's id is its `ROLES` value, a permission's id is its code), so they are identical in every database and the seed can be re-run safely.
 - **Login reservation.** `login_normalized` is unique across _all_ rows, including soft-deleted ones, so a deleted login cannot be re-registered by someone else.
 - **Settings.** `updated_by` is `NULL` while the row still holds the seeded defaults.
+- **Module 2 tables.** `login_attempts` is append-only (counters are derived by queries; an administrator's unlock is a `CLEARED` row). `security_events` never stores a password, hash, token or CAPTCHA answer, and `honeytokens.alert_url_env` holds the _name_ of an environment variable, never the Canarytokens URL. Migration `0004_module2_abuse_defence` rebuilds `security_settings` to add four CHECKed columns. The generated `INSERT ... SELECT` was corrected to copy only the pre-existing columns (the generator also selected the new ones from the old table, which does not have them), so the existing row survives with the new defaults.
 - **Time.** Row timestamps default to `clock.now()` (`src/server/time/clock.ts`), so tests that replace the clock also control `created_at`/`updated_at`.
 - **ADMIN triggers.** Migration `0001_protect_admin_account` was created with `drizzle-kit generate --custom` (the supported way to ship raw SQL; Drizzle does not model triggers). For the row where `login_normalized = 'admin'` it rejects `DELETE` and any `UPDATE` that changes `login`/`login_normalized` or `role_id`, sets `is_blocked` to non-zero, or sets `deleted_at`. Other columns, such as `password_hash`, stay writable. A trigger violation is reported by SQLite as `SQLITE_CONSTRAINT_TRIGGER`, which `mapDbError` deliberately does not translate: services must check the rule first and return their own error.
