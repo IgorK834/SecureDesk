@@ -1,11 +1,13 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { AppDb } from '../db/connection';
 import { type AuthStage, type UserRow, users } from '../db/schema';
-import { loginRateLimiter } from '../security/login-rate-limiter';
+import { AccountLockedError } from '../http/errors';
+import { resolveAttempt } from '../security/attempt-tracker';
 import { readSecuritySettings } from '../security/settings';
 import { clock } from '../time/clock';
 import { normalizeLogin } from '../users/login';
 import { type Profile, toProfile } from '../users/mappers';
+import { runLoginGuard } from './login-guard';
 import { getDummyHash, verifyPassword } from './password-hasher';
 import { createSession, revokeSessionByToken } from './session-service';
 import { isTemporaryPasswordExpired } from './temporary-password';
@@ -18,8 +20,9 @@ export interface LoginInput {
 
 export interface LoginContext {
   db: AppDb;
-  /** Who is calling (the client address); only used for rate limiting. */
-  clientKey: string;
+  ip: string;
+  userAgent?: string | null;
+  requestId: string;
   /** The session token the request already carried, if any. It is revoked on a successful login. */
   presentedSessionToken?: string;
 }
@@ -33,8 +36,7 @@ export type LoginResult =
       session: { id: string; token: string; expiresAt: Date };
     }
   // One outcome for every way credentials can be refused, so callers cannot tell them apart.
-  | { outcome: 'invalid_credentials' }
-  | { outcome: 'rate_limited'; retryAfterSeconds: number };
+  | { outcome: 'invalid_credentials' };
 
 const INVALID_CREDENTIALS: LoginResult = { outcome: 'invalid_credentials' };
 
@@ -68,11 +70,41 @@ function authStageFor(user: UserRow, db: AppDb, now: Date): AuthStage {
  */
 export async function authenticate(input: LoginInput, ctx: LoginContext): Promise<LoginResult> {
   const normalizedLogin = normalizeLogin(input.login);
+  const settings = readSecuritySettings(ctx.db);
+  const guard = await runLoginGuard(
+    {
+      ip: ctx.ip,
+      normalizedLogin,
+      userAgent: ctx.userAgent ?? null,
+      requestId: ctx.requestId,
+      now: clock.now(),
+    },
+    {
+      db: ctx.db,
+      maxAttempts: settings.maxFailedLoginAttempts,
+      ipFailedAttemptLimit: settings.ipFailedAttemptLimit,
+    },
+  );
+  if (guard.status === 'refused') throw guard.error;
 
-  const decision = await loginRateLimiter.check(ctx.clientKey, normalizedLogin);
-  if (!decision.allowed) {
-    return { outcome: 'rate_limited', retryAfterSeconds: decision.retryAfterSeconds };
-  }
+  const resolveFailure = () => {
+    const now = clock.now();
+    const resolved = resolveAttempt(ctx.db, guard.attemptId, 'FAILED', {
+      now,
+      maxAttempts: settings.maxFailedLoginAttempts,
+      requestId: ctx.requestId,
+      userAgent: ctx.userAgent,
+      sprayingDistinctLoginThreshold: settings.sprayingDistinctLoginThreshold,
+    });
+    if (resolved.lockedUntil) {
+      const retryAfterSeconds = Math.max(
+        0,
+        Math.ceil((resolved.lockedUntil.getTime() - now.getTime()) / 1000),
+      );
+      throw new AccountLockedError(resolved.lockedUntil, retryAfterSeconds);
+    }
+    return INVALID_CREDENTIALS;
+  };
 
   // Soft-deleted accounts are not found at all, so they take the unknown-login path.
   const user = ctx.db
@@ -89,17 +121,22 @@ export async function authenticate(input: LoginInput, ctx: LoginContext): Promis
     input.password,
   );
   if (!user || !passwordMatches || user.isBlocked) {
-    loginRateLimiter.recordFailure(ctx.clientKey, normalizedLogin);
-    return INVALID_CREDENTIALS;
+    return resolveFailure();
   }
 
   const now = clock.now();
   // A NULL expiry means "no deadline" (the seeded ADMIN's bootstrap password).
   const expiry = user.temporaryPasswordExpiresAt;
   if (user.mustChangePassword && expiry !== null && isTemporaryPasswordExpired(expiry, now)) {
-    loginRateLimiter.recordFailure(ctx.clientKey, normalizedLogin);
-    return INVALID_CREDENTIALS;
+    return resolveFailure();
   }
+
+  resolveAttempt(ctx.db, guard.attemptId, 'SUCCESS', {
+    now,
+    maxAttempts: settings.maxFailedLoginAttempts,
+    requestId: ctx.requestId,
+    userAgent: ctx.userAgent,
+  });
 
   const authStage = authStageFor(user, ctx.db, now);
   // A token the request already carried is revoked as the new session is created, in one

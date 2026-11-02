@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMigratedDb, insertUser } from '../db/__fixtures__/test-db';
 import type { AppDb } from '../db/connection';
-import { securitySettings, sessions, users } from '../db/schema';
+import { loginAttempts, securityEvents, securitySettings, sessions, users } from '../db/schema';
+import { AccountLockedError } from '../http/errors';
 import { ROLES } from '../permissions/codes';
-import { loginRateLimiter } from '../security/login-rate-limiter';
 import { setClockForTests } from '../time/clock';
 import { authenticate } from './login-service';
 import { getDummyHash, hashPassword, verifyPassword } from './password-hasher';
@@ -53,7 +53,13 @@ function addUser(overrides: Partial<typeof users.$inferInsert> = {}) {
 function attempt(login: string, password: string = PASSWORD, extra: { token?: string } = {}) {
   return authenticate(
     { login, password },
-    { db, clientKey: '203.0.113.7', presentedSessionToken: extra.token },
+    {
+      db,
+      ip: '203.0.113.7',
+      requestId: 'login-service-test',
+      userAgent: 'vitest',
+      presentedSessionToken: extra.token,
+    },
   );
 }
 
@@ -367,34 +373,96 @@ describe('session fixation', () => {
   });
 });
 
-describe('rate limiting hook', () => {
-  it('lets every attempt through until a real limiter replaces the placeholder', async () => {
-    await expect(loginRateLimiter.check('any', 'any')).resolves.toStrictEqual({ allowed: true });
-  });
-
-  it('is asked about the client and the normalized login before any password work happens', async () => {
-    const check = vi.spyOn(loginRateLimiter, 'check');
+describe('persistent account lockout', () => {
+  it('uses the administrator-configured failure threshold', async () => {
+    db.insert(securitySettings).values({ id: 1, maxFailedLoginAttempts: 3 }).run();
     addUser();
 
-    await attempt('EMPLOYEE1');
-
-    expect(check).toHaveBeenCalledExactlyOnceWith('203.0.113.7', 'employee1');
-    expect(check.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(verifyPassword).mock.invocationCallOrder[0] ?? 0,
-    );
-  });
-
-  it('refuses a throttled attempt without verifying anything, even with the right password', async () => {
-    vi.spyOn(loginRateLimiter, 'check').mockResolvedValue({
-      allowed: false,
-      retryAfterSeconds: 42,
+    await expect(attempt('employee1', 'wrong')).resolves.toStrictEqual({
+      outcome: 'invalid_credentials',
     });
+    await expect(attempt('employee1', 'wrong')).resolves.toStrictEqual({
+      outcome: 'invalid_credentials',
+    });
+    await expect(attempt('employee1', 'wrong')).rejects.toMatchObject({
+      code: 'AUTH_ACCOUNT_LOCKED',
+      details: { retryAfterSeconds: 900 },
+    });
+  });
+
+  it('SEC-31 and SEC-39: locks on the fifth failure without changing the account block flag', async () => {
     addUser();
 
-    const result = await attempt('employee1');
+    for (let count = 1; count < 5; count++) {
+      await expect(attempt('employee1', 'wrong')).resolves.toStrictEqual({
+        outcome: 'invalid_credentials',
+      });
+    }
+    await expect(attempt('employee1', 'wrong')).rejects.toMatchObject({
+      status: 429,
+      code: 'AUTH_ACCOUNT_LOCKED',
+      details: {
+        lockedUntil: '2026-03-10T12:15:00.000Z',
+        retryAfterSeconds: 900,
+      },
+    });
 
-    expect(result).toStrictEqual({ outcome: 'rate_limited', retryAfterSeconds: 42 });
-    expect(verifyPassword).not.toHaveBeenCalled();
-    expect(sessionRows()).toHaveLength(0);
+    expect(db.select().from(securityEvents).all()).toMatchObject([
+      { type: 'ACCOUNT_LOCKED', details: expect.stringContaining('2026-03-10T12:15:00.000Z') },
+    ]);
+    expect(db.select().from(users).get()?.isBlocked).toBe(false);
+
+    db.update(users).set({ isBlocked: true }).run();
+    db.update(users).set({ isBlocked: false }).run();
+    await expect(attempt('employee1')).rejects.toBeInstanceOf(AccountLockedError);
+  });
+
+  it('SEC-32: remains locked at 14:59 and accepts a reservation at exactly 15:00', async () => {
+    addUser();
+    for (let count = 0; count < 5; count++) {
+      await attempt('employee1', 'wrong').catch(() => undefined);
+    }
+
+    now = new Date(T0.getTime() + 14 * 60 * 1000 + 59 * 1000);
+    await expect(attempt('employee1')).rejects.toBeInstanceOf(AccountLockedError);
+    now = new Date(T0.getTime() + 15 * 60 * 1000);
+    await expect(attempt('employee1')).resolves.toMatchObject({ outcome: 'authenticated' });
+  });
+
+  it('SEC-33: refuses the correct password during a lock without moving its end', async () => {
+    addUser();
+    for (let count = 0; count < 5; count++) {
+      await attempt('employee1', 'wrong').catch(() => undefined);
+    }
+
+    now = new Date(T0.getTime() + 60_000);
+    await expect(attempt('employee1')).rejects.toMatchObject({
+      details: { lockedUntil: '2026-03-10T12:15:00.000Z', retryAfterSeconds: 840 },
+    });
+    expect(verifyPassword).toHaveBeenCalledTimes(5);
+  });
+
+  it('SEC-35: a successful login resets the failed-attempt counter', async () => {
+    addUser();
+    for (let count = 0; count < 4; count++) await attempt('employee1', 'wrong');
+
+    await expect(attempt('employee1')).resolves.toMatchObject({ outcome: 'authenticated' });
+    for (let count = 0; count < 4; count++) {
+      await expect(attempt('employee1', 'wrong')).resolves.toStrictEqual({
+        outcome: 'invalid_credentials',
+      });
+    }
+  });
+
+  it('SEC-36: fifty parallel failures start at most five credential verifications', async () => {
+    addUser();
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 50 }, () => attempt('employee1', 'wrong')),
+    );
+
+    expect(verifyPassword).toHaveBeenCalledTimes(5);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(46);
+    expect(db.select().from(loginAttempts).all()).toHaveLength(5);
   });
 });

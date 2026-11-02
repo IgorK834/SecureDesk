@@ -1,18 +1,15 @@
 import { NextRequest } from 'next/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeClock } from '../../../../../../../tests/helpers/fake-clock';
+import { LOGIN_GUARD_STAGES } from '../../../../server/auth/login-guard';
 import { hashPassword } from '../../../../server/auth/password-hasher';
 import { hashSessionToken } from '../../../../server/auth/session-service';
 import { captureOutput } from '../../../../server/__fixtures__/capture-output';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
 import { insertUser } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
-import { sessions, users } from '../../../../server/db/schema';
+import { loginAttempts, securityEvents, sessions, users } from '../../../../server/db/schema';
 import { seedDatabase } from '../../../../server/db/seeds';
-import {
-  loginRateLimiter,
-  resetLoginRateLimiterForTests,
-} from '../../../../server/security/login-rate-limiter';
 import { POST, dynamic, runtime } from './route';
 
 // These tests drive the real route handler against the real database wiring (an in-memory test
@@ -158,6 +155,20 @@ describe('POST /api/auth/login: success', () => {
     expect((await loginAs(longLogin, longPassword)).status).toBe(200);
   });
 
+  it('accepts the strict Module 2 guard fields while their stages are pass-through', async () => {
+    addUser();
+
+    const internal = await post({
+      login: 'employee1',
+      password: PASSWORD,
+      captcha: { challengeId: 'challenge-id', answer: 'reversed' },
+      website: '',
+      formToken: 'signed-form-token',
+    });
+
+    expect(internal.status).toBe(200);
+  });
+
   it('replaces a session cookie the request already carried, so a planted one is useless', async () => {
     addUser();
     const planted = cookieValue(await loginAs('employee1'));
@@ -295,6 +306,16 @@ describe('POST /api/auth/login: malformed requests', () => {
     ['a numeric password', { login: 'employee1', password: 123 }],
     ['an object as the password', { login: 'employee1', password: { $ne: '' } }],
     ['an extra key', { login: 'employee1', password: validPassword, role: 'ADMINISTRATOR' }],
+    [
+      'an extra CAPTCHA key',
+      { login: 'employee1', password: validPassword, captcha: { token: 'x', answer: 'y' } },
+    ],
+    [
+      'an empty CAPTCHA token',
+      { login: 'employee1', password: validPassword, captcha: { token: '' } },
+    ],
+    ['a numeric honeypot', { login: 'employee1', password: validPassword, website: 1 }],
+    ['an empty form token', { login: 'employee1', password: validPassword, formToken: '' }],
     ['an empty login', { login: '', password: validPassword }],
     ['a login of only spaces', { login: '   ', password: validPassword }],
     ['a 65-character login', { login: 'l'.repeat(65), password: validPassword }],
@@ -303,7 +324,6 @@ describe('POST /api/auth/login: malformed requests', () => {
   ];
 
   it.each(bad)('rejects %s with 400 and the standard error shape', async (_, body) => {
-    const check = vi.spyOn(loginRateLimiter, 'check');
     addUser();
 
     const response = await post(body as string);
@@ -315,7 +335,7 @@ describe('POST /api/auth/login: malformed requests', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(response.headers.getSetCookie()).toHaveLength(0);
     // Rejected before any account lookup or password work.
-    expect(check).not.toHaveBeenCalled();
+    expect(db.select().from(loginAttempts).all()).toHaveLength(0);
   });
 
   // A cross-site HTML form can only send these types without a CORS preflight. If they were read
@@ -328,7 +348,6 @@ describe('POST /api/auth/login: malformed requests', () => {
     ['text/json', 'text/json'],
     ['an empty Content-Type', ''],
   ])('refuses valid credentials sent as %s', async (_, contentType) => {
-    const check = vi.spyOn(loginRateLimiter, 'check');
     addUser();
 
     const response = await post(
@@ -344,7 +363,7 @@ describe('POST /api/auth/login: malformed requests', () => {
       },
     });
     expect(response.headers.getSetCookie()).toHaveLength(0);
-    expect(check).not.toHaveBeenCalled();
+    expect(db.select().from(loginAttempts).all()).toHaveLength(0);
     expect(db.select().from(sessions).all()).toHaveLength(0);
   });
 
@@ -367,24 +386,31 @@ describe('POST /api/auth/login: malformed requests', () => {
     ['a foreign Origin', { origin: 'https://evil.example' }],
     ['no Origin or Referer', { origin: '' }],
   ])('refuses login CSRF from %s before looking up the account', async (_, headers) => {
-    const check = vi.spyOn(loginRateLimiter, 'check');
     addUser();
 
     const response = await post({ login: 'employee1', password: PASSWORD }, headers);
 
     expect(response.status).toBe(403);
     expect((await response.json()).error.code).toBe('CSRF_ORIGIN_MISMATCH');
-    expect(check).not.toHaveBeenCalled();
+    expect(db.select().from(loginAttempts).all()).toHaveLength(0);
     expect(db.select().from(sessions).all()).toHaveLength(0);
   });
 });
 
-describe('POST /api/auth/login: rate limiting hook', () => {
+describe('POST /api/auth/login: ordered guard limits', () => {
   it('answers a throttled attempt with 429 and Retry-After, even for correct credentials', async () => {
-    vi.spyOn(loginRateLimiter, 'check').mockResolvedValue({
-      allowed: false,
-      retryAfterSeconds: 42,
-    });
+    db.insert(loginAttempts)
+      .values(
+        Array.from({ length: 20 }, (_, index) => ({
+          loginNormalized: `login-${index}`,
+          ipKey: 'unknown',
+          kind: 'CREDENTIAL' as const,
+          outcome: 'FAILED' as const,
+          occurredAt: new Date(T0.getTime() - 858_000),
+          resolvedAt: new Date(T0.getTime() - 858_000),
+        })),
+      )
+      .run();
     addUser();
 
     const response = await loginAs('employee1');
@@ -393,15 +419,15 @@ describe('POST /api/auth/login: rate limiting hook', () => {
     expect(response.headers.get('Retry-After')).toBe('42');
     expect(await response.json()).toStrictEqual({
       error: {
-        code: 'RATE_LIMITED',
-        message: 'Zbyt wiele prób logowania. Spróbuj ponownie później',
+        code: 'AUTH_IP_BLOCKED',
+        message: 'Zbyt wiele nieudanych prób logowania z tego adresu. Spróbuj ponownie później',
+        details: { retryAfterSeconds: 42 },
       },
     });
     expect(response.headers.getSetCookie()).toHaveLength(0);
   });
 
   it('keys the limiter on the address the trusted proxy appended, but only behind a trusted proxy', async () => {
-    const check = vi.spyOn(loginRateLimiter, 'check');
     const forwarded = { 'x-forwarded-for': '10.0.0.1, 203.0.113.7' };
 
     vi.stubEnv('TRUST_PROXY', 'true');
@@ -411,36 +437,137 @@ describe('POST /api/auth/login: rate limiting hook', () => {
     vi.stubEnv('TRUST_PROXY', 'false');
     await post({ login: 'Employee1', password: PASSWORD }, forwarded);
 
-    expect(check.mock.calls).toStrictEqual([
-      ['203.0.113.7', 'employee1'],
-      ['unknown', 'employee1'],
-      ['unknown', 'employee1'],
+    expect(db.select({ ipKey: loginAttempts.ipKey }).from(loginAttempts).all()).toStrictEqual([
+      { ipKey: '203.0.113.7' },
+      { ipKey: 'unknown' },
+      { ipKey: 'unknown' },
     ]);
   });
 
-  it('SEC-27: the sixth failure per IP and submitted login is the same 429 for an existing and unknown login', async () => {
+  it('SEC-55: the 21st failed attempt across distinct logins is IP-blocked and another address is unaffected', async () => {
+    vi.stubEnv('TRUST_PROXY', 'true');
+    db.insert(loginAttempts)
+      .values(
+        Array.from({ length: 20 }, (_, index) => ({
+          loginNormalized: `spray-${index}`,
+          ipKey: '203.0.113.7',
+          kind: 'CREDENTIAL' as const,
+          outcome: 'FAILED' as const,
+          occurredAt: T0,
+          resolvedAt: T0,
+        })),
+      )
+      .run();
+
+    const blocked = await post(
+      { login: 'spray-20', password: 'wrong' },
+      { 'x-forwarded-for': '10.0.0.1, 203.0.113.7' },
+    );
+    const otherAddress = await post(
+      { login: 'spray-20', password: 'wrong' },
+      { 'x-forwarded-for': '10.0.0.1, 203.0.113.8' },
+    );
+
+    expect(blocked.status).toBe(429);
+    expect((await blocked.json()).error.code).toBe('AUTH_IP_BLOCKED');
+    expect(otherAddress.status).toBe(401);
+  });
+
+  it('SEC-56: rotating the forged leftmost X-Forwarded-For value does not evade a trusted proxy key', async () => {
+    vi.stubEnv('TRUST_PROXY', 'true');
+    db.insert(loginAttempts)
+      .values(
+        Array.from({ length: 19 }, (_, index) => ({
+          loginNormalized: `spray-${index}`,
+          ipKey: '203.0.113.7',
+          kind: 'CREDENTIAL' as const,
+          outcome: 'FAILED' as const,
+          occurredAt: T0,
+          resolvedAt: T0,
+        })),
+      )
+      .run();
+
+    expect(
+      (
+        await post(
+          { login: 'spray-19', password: 'wrong' },
+          { 'x-forwarded-for': '198.51.100.1, 203.0.113.7' },
+        )
+      ).status,
+    ).toBe(401);
+    const rotated = await post(
+      { login: 'spray-20', password: 'wrong' },
+      { 'x-forwarded-for': '198.51.100.99, 203.0.113.7' },
+    );
+
+    expect(rotated.status).toBe(429);
+    expect((await rotated.json()).error.code).toBe('AUTH_IP_BLOCKED');
+  });
+
+  it('SEC-57: the eighth distinct failed login raises one spraying event in the bucket', async () => {
+    db.insert(loginAttempts)
+      .values(
+        Array.from({ length: 7 }, (_, index) => ({
+          loginNormalized: `spray-${index}`,
+          ipKey: 'unknown',
+          kind: 'CREDENTIAL' as const,
+          outcome: 'FAILED' as const,
+          occurredAt: T0,
+          resolvedAt: T0,
+        })),
+      )
+      .run();
+
+    expect((await loginAs('spray-7', 'wrong')).status).toBe(401);
+    expect((await loginAs('spray-8', 'wrong')).status).toBe(401);
+
+    const spraying = db
+      .select()
+      .from(securityEvents)
+      .all()
+      .filter((event) => event.type === 'PASSWORD_SPRAYING_SUSPECTED');
+    expect(spraying).toHaveLength(1);
+    expect(JSON.parse(spraying[0]?.details ?? '{}')).toStrictEqual({
+      distinctLogins: 8,
+      threshold: 8,
+    });
+  });
+
+  it('SEC-34: the fifth failure is the same account-lock response for an existing and unknown login', async () => {
     addUser();
 
-    const sixthResponse = async (login: string) => {
+    const fifthResponse = async (login: string) => {
       const responses: Response[] = [];
-      for (let attempt = 0; attempt < 6; attempt++) {
+      for (let attempt = 0; attempt < 5; attempt++) {
         responses.push(await loginAs(login, 'definitely-not-the-password'));
       }
-      expect(responses.slice(0, 5).map((response) => response.status)).toStrictEqual([
-        401, 401, 401, 401, 401,
+      expect(responses.slice(0, 4).map((response) => response.status)).toStrictEqual([
+        401, 401, 401, 401,
       ]);
-      return responses[5] as Response;
+      return responses[4] as Response;
     };
 
-    const existing = await sixthResponse('employee1');
-    resetLoginRateLimiterForTests();
-    const unknown = await sixthResponse('does-not-exist');
+    const existing = await fifthResponse('employee1');
+    const unknown = await fifthResponse('does-not-exist');
 
     expect(existing.status).toBe(429);
     expect(unknown.status).toBe(429);
     expect(existing.headers.get('Retry-After')).toBe('900');
     expect(unknown.headers.get('Retry-After')).toBe('900');
-    expect(await existing.text()).toBe(await unknown.text());
+    const existingBody = await existing.text();
+    const unknownBody = await unknown.text();
+    expect(existingBody).toBe(unknownBody);
+    expect(JSON.parse(existingBody)).toStrictEqual({
+      error: {
+        code: 'AUTH_ACCOUNT_LOCKED',
+        message: 'Konto jest tymczasowo zablokowane po zbyt wielu nieudanych próbach logowania',
+        details: {
+          lockedUntil: '2026-03-10T12:15:00.000Z',
+          retryAfterSeconds: 900,
+        },
+      },
+    });
   });
 });
 
@@ -494,9 +621,11 @@ describe('POST /api/auth/login: logging', () => {
   });
 
   it('answers an unexpected failure with a generic 500 and logs neither the error nor the input', async () => {
-    vi.spyOn(loginRateLimiter, 'check').mockRejectedValue(
-      new Error(`database exploded: params ${SECRET} $argon2id$v=19$leaked-hash`),
-    );
+    const ipStage = LOGIN_GUARD_STAGES.find((stage) => stage.name === 'ipBlock');
+    if (!ipStage) throw new Error('ipBlock stage missing');
+    vi.spyOn(ipStage, 'run').mockImplementation(() => {
+      throw new Error(`database exploded: params ${SECRET} $argon2id$v=19$leaked-hash`);
+    });
     addUser();
     const output = captureOutput();
 
