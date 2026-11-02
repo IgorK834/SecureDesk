@@ -72,6 +72,14 @@ export interface SecuritySettings {
   rejectPersonalDataInPassword: boolean;
   passwordMaxAgeDays: number | null;
   sessionIdleTimeoutMinutes: number;
+  /** Failed attempts per login and 15-minute window before the account is locked. */
+  maxFailedLoginAttempts: number;
+  /** Failed attempts per IP address and 15-minute window before the address is blocked. */
+  ipFailedAttemptLimit: number;
+  /** Distinct logins failed from one address that raise a password-spraying event. */
+  sprayingDistinctLoginThreshold: number;
+  /** Days a security event is kept. */
+  securityEventRetentionDays: number;
 }
 
 const USERS_URL = '/api/admin/users';
@@ -133,7 +141,7 @@ export class AdminApi {
     return this.http.get<SecuritySettings>(SECURITY_SETTINGS_URL);
   }
 
-  /** Any non-empty subset of the settings; the answer is all four as stored. */
+  /** Any non-empty subset of the settings; the answer is all eight as stored. */
   updateSecuritySettings(changes: Partial<SecuritySettings>): Observable<SecuritySettings> {
     return this.http.patch<SecuritySettings>(SECURITY_SETTINGS_URL, changes);
   }
