@@ -4,6 +4,7 @@ import type { AdminUser, UserStatus } from '../../core/http/admin-api.service';
 export const STATUS_LABELS: Record<UserStatus, string> = {
   active: 'Active',
   blocked: 'Blocked',
+  locked: 'Locked',
   pending: 'Pending first login',
 };
 
@@ -15,11 +16,15 @@ export const ROLE_LABELS: Record<Role, string> = {
 };
 
 /**
- * The same three states the server filters by. A blocked account is "blocked" whether or not it
+ * The same four states the server filters by. A blocked account is "blocked" whether or not it
  * also owes its first password change, so each account is in exactly one state.
  */
-export function userStatus(user: Pick<AdminUser, 'isBlocked' | 'mustChangePassword'>): UserStatus {
+export function userStatus(
+  user: Pick<AdminUser, 'isBlocked' | 'mustChangePassword'> &
+    Partial<Pick<AdminUser, 'lockedUntil'>>,
+): UserStatus {
   if (user.isBlocked) return 'blocked';
+  if (user.lockedUntil) return 'locked';
   return user.mustChangePassword ? 'pending' : 'active';
 }
 
@@ -29,7 +34,8 @@ export function userStatus(user: Pick<AdminUser, 'isBlocked' | 'mustChangePasswo
  * from the very instant of `temporaryPasswordExpiresAt`.
  */
 export function hasExpiredTemporaryPassword(
-  user: Pick<AdminUser, 'isBlocked' | 'mustChangePassword' | 'temporaryPasswordExpiresAt'>,
+  user: Pick<AdminUser, 'isBlocked' | 'mustChangePassword' | 'temporaryPasswordExpiresAt'> &
+    Partial<Pick<AdminUser, 'lockedUntil'>>,
   now: number = Date.now(),
 ): boolean {
   return (
