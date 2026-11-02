@@ -11,6 +11,33 @@ export function describeApiError(error: unknown): { status: number; code?: strin
   return typeof code === 'string' ? { status: error.status, code } : { status: error.status };
 }
 
+export interface ApiErrorDetails {
+  retryAfterSeconds?: number;
+  lockedUntil?: string;
+}
+
+/** Reads only the numeric/ISO fields the login countdown is allowed to trust. */
+export function apiErrorDetails(error: unknown): ApiErrorDetails {
+  if (!(error instanceof HttpErrorResponse)) return {};
+  const details = (
+    error.error as {
+      error?: { details?: { retryAfterSeconds?: unknown; lockedUntil?: unknown } };
+    } | null
+  )?.error?.details;
+  if (!details) return {};
+
+  const retryAfterSeconds = details.retryAfterSeconds;
+  const lockedUntil = details.lockedUntil;
+  return {
+    ...(typeof retryAfterSeconds === 'number' &&
+      Number.isInteger(retryAfterSeconds) &&
+      retryAfterSeconds >= 0 && { retryAfterSeconds }),
+    ...(typeof lockedUntil === 'string' &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(lockedUntil) &&
+      !Number.isNaN(Date.parse(lockedUntil)) && { lockedUntil }),
+  };
+}
+
 /** Reads only the allowlisted list shape used by password-policy errors, never server prose. */
 export function passwordPolicyViolations(error: unknown): string[] {
   if (!(error instanceof HttpErrorResponse)) return [];

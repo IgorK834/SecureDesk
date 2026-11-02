@@ -27,7 +27,8 @@
     "db:reset:test": "npm run db:reset:test -w apps/backend",
     "db:seed": "npm run db:seed -w apps/backend",
     "db:seed:test": "npm run db:seed:test -w apps/backend",
-    "maintenance:purge": "npm run maintenance:purge -w apps/backend"
+    "maintenance:purge": "npm run maintenance:purge -w apps/backend",
+    "admin:unlock": "npm run admin:unlock -w apps/backend --"
   },
   "overrides": {
     "@angular/build": {

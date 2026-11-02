@@ -14,9 +14,67 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly details?: Record<string, unknown>,
+    readonly headers?: HeadersInit,
   ) {
     super(message);
     this.name = 'ApiError';
+  }
+}
+
+/** 429: the submitted login has exhausted its persistent credential-attempt budget. */
+export class AccountLockedError extends ApiError {
+  constructor(lockedUntil: Date, retryAfterSeconds: number) {
+    super(
+      429,
+      'AUTH_ACCOUNT_LOCKED',
+      'Konto jest tymczasowo zablokowane po zbyt wielu nieudanych próbach logowania',
+      { lockedUntil: lockedUntil.toISOString(), retryAfterSeconds },
+      { 'Retry-After': String(retryAfterSeconds) },
+    );
+  }
+}
+
+/** 429: the caller address has exhausted the retained Module 1 per-IP window. */
+export class IpBlockedError extends ApiError {
+  constructor(retryAfterSeconds: number) {
+    super(
+      429,
+      'AUTH_IP_BLOCKED',
+      'Zbyt wiele nieudanych prób logowania z tego adresu. Spróbuj ponownie później',
+      { retryAfterSeconds },
+      { 'Retry-After': String(retryAfterSeconds) },
+    );
+  }
+}
+
+/** 429: repeated current-password guesses have temporarily closed password change. */
+export class PasswordChangeLockedError extends ApiError {
+  constructor(lockedUntil: Date, retryAfterSeconds: number) {
+    super(
+      429,
+      'AUTH_PASSWORD_CHANGE_LOCKED',
+      'Zmiana hasła jest tymczasowo zablokowana po zbyt wielu nieudanych próbach',
+      { lockedUntil: lockedUntil.toISOString(), retryAfterSeconds },
+      { 'Retry-After': String(retryAfterSeconds) },
+    );
+  }
+}
+
+export class CaptchaRequiredError extends ApiError {
+  constructor() {
+    super(400, 'CAPTCHA_REQUIRED', 'Wymagane potwierdzenie CAPTCHA');
+  }
+}
+
+export class CaptchaFailedError extends ApiError {
+  constructor() {
+    super(403, 'CAPTCHA_FAILED', 'Nie udało się zweryfikować CAPTCHA');
+  }
+}
+
+export class CaptchaUnavailableError extends ApiError {
+  constructor() {
+    super(503, 'CAPTCHA_UNAVAILABLE', 'Weryfikacja CAPTCHA jest chwilowo niedostępna');
   }
 }
 

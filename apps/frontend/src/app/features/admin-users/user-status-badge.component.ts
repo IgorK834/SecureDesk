@@ -1,16 +1,24 @@
+import { DatePipe } from '@angular/common';
 import { Component, Input } from '@angular/core';
 import type { AdminUser } from '../../core/http/admin-api.service';
 import { STATUS_LABELS, hasExpiredTemporaryPassword, userStatus } from './user-status';
 
 /**
- * Active, Blocked or Pending first login. The state is written out in words, not only coloured,
+ * Active, Blocked, temporarily Locked or Pending first login. The state is written out in words,
  * so it does not depend on seeing the colour. A pending account whose temporary password has run
  * out says so: it can no longer sign in until the administrator issues a new one.
  */
 @Component({
   selector: 'app-user-status-badge',
+  imports: [DatePipe],
   template: `
-    <span class="badge" [class]="'badge badge-' + status">{{ label }}</span>
+    <span class="badge" [class]="'badge badge-' + status">
+      @if (status === 'locked') {
+        Locked until {{ user.lockedUntil | date: 'HH:mm' }}
+      } @else {
+        {{ label }}
+      }
+    </span>
     @if (expired) {
       <span class="hint">Temporary password expired</span>
     }
@@ -28,6 +36,9 @@ import { STATUS_LABELS, hasExpiredTemporaryPassword, userStatus } from './user-s
     }
     .badge-blocked {
       color: #b3261e;
+    }
+    .badge-locked {
+      color: #8a5100;
     }
     .badge-pending {
       color: #8a5100;

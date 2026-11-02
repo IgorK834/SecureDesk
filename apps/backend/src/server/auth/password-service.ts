@@ -1,7 +1,11 @@
 import { and, desc, eq, notInArray } from 'drizzle-orm';
 import type { AppDb, AppTransaction } from '../db/connection';
 import { type UserRow, passwordHistory, users } from '../db/schema';
-import { ApiError } from '../http/errors';
+import { ApiError, PasswordChangeLockedError } from '../http/errors';
+import {
+  reservePasswordChangeAttempt,
+  resolvePasswordChangeAttempt,
+} from '../security/attempt-tracker';
 import { readSecuritySettings } from '../security/settings';
 import { clock } from '../time/clock';
 import { type Profile, toProfile } from '../users/mappers';
@@ -46,6 +50,12 @@ export interface PasswordChangeResult {
   authStage: 'FULLY_AUTHENTICATED' | 'TOTP_CHALLENGE';
   /** The only copy of the new token: for the cookie, never to be stored or logged. */
   session: { id: string; token: string; expiresAt: Date };
+}
+
+export interface PasswordChangeContext {
+  ip: string;
+  requestId: string;
+  userAgent?: string | null;
 }
 
 const notSignedIn = () => new ApiError(401, 'AUTH_REQUIRED', 'Wymagane zalogowanie');
@@ -164,8 +174,8 @@ function toResult(user: UserRow, created: CreatedSession): PasswordChangeResult 
 
 /**
  * The ordinary password change, for a fully authenticated session or one whose password has
- * expired. The current password must be proven first; a wrong one is refused (400
- * `CURRENT_PASSWORD_INCORRECT`) before anything is written.
+ * expired. After the route's CAPTCHA stage, the current password attempt is reserved before
+ * Argon2 verification; a wrong one is refused without changing the credential.
  *
  * The old hash joins the history (only when it was a regular password) and the history is cut
  * back to the five newest entries, in the same transaction that installs the new hash and
@@ -175,12 +185,50 @@ export async function changePassword(
   db: AppDb,
   session: SessionInfo,
   input: ChangePasswordInput,
+  context: PasswordChangeContext = { ip: 'unknown', requestId: 'password-change' },
 ): Promise<PasswordChangeResult> {
   const user = loadActiveUser(db, session.userId);
+  const settings = readSecuritySettings(db);
+  const reservedAt = clock.now();
+  const reservation = reservePasswordChangeAttempt(db, {
+    loginNormalized: user.loginNormalized,
+    ipKey: context.ip,
+    now: reservedAt,
+    maxAttempts: settings.maxFailedLoginAttempts,
+  });
+  if (reservation.status === 'locked') {
+    const retryAfterSeconds = Math.max(
+      0,
+      Math.ceil((reservation.lockedUntil.getTime() - reservedAt.getTime()) / 1000),
+    );
+    throw new PasswordChangeLockedError(reservation.lockedUntil, retryAfterSeconds);
+  }
 
   if (!(await verifyPassword(user.passwordHash, input.currentPassword))) {
+    const now = clock.now();
+    const resolved = resolvePasswordChangeAttempt(db, reservation.attemptId, 'FAILED', {
+      now,
+      maxAttempts: settings.maxFailedLoginAttempts,
+      requestId: context.requestId,
+      userId: user.id,
+      userAgent: context.userAgent,
+    });
+    if (resolved.lockedUntil) {
+      const retryAfterSeconds = Math.max(
+        0,
+        Math.ceil((resolved.lockedUntil.getTime() - now.getTime()) / 1000),
+      );
+      throw new PasswordChangeLockedError(resolved.lockedUntil, retryAfterSeconds);
+    }
     throw new ApiError(400, 'CURRENT_PASSWORD_INCORRECT', 'Obecne hasło jest niepoprawne');
   }
+  resolvePasswordChangeAttempt(db, reservation.attemptId, 'SUCCESS', {
+    now: clock.now(),
+    maxAttempts: settings.maxFailedLoginAttempts,
+    requestId: context.requestId,
+    userId: user.id,
+    userAgent: context.userAgent,
+  });
   assertConfirmed(input);
   assertPasswordPolicy(db, user, input.newPassword);
   await assertNotReused(db, user.id, input.newPassword);

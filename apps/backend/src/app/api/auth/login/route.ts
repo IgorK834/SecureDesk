@@ -16,6 +16,19 @@ const LoginBody = z
   .object({
     login: z.string().trim().min(1).max(64),
     password: z.string().min(1).max(1024), // never trim or normalize the password
+    captcha: z
+      .union([
+        z.object({ token: z.string().min(1).max(4096) }).strict(),
+        z
+          .object({
+            challengeId: z.string().min(1).max(128),
+            answer: z.string().min(1).max(128),
+          })
+          .strict(),
+      ])
+      .optional(),
+    website: z.string().max(256).optional(),
+    formToken: z.string().min(1).max(4096).optional(),
   })
   .strict();
 
@@ -30,7 +43,9 @@ export const POST = defineRoute({
   handler: async ({ request, requestId, body }) => {
     const result = await authenticate(body, {
       db,
-      clientKey: getClientIp(request),
+      ip: getClientIp(request),
+      userAgent: request.headers.get('user-agent'),
+      requestId,
       presentedSessionToken: readSessionToken(request),
     });
 
@@ -49,14 +64,6 @@ export const POST = defineRoute({
         response.cookies.set(csrfCookie(result.session.id, result.session.expiresAt));
         return response;
       }
-      case 'rate_limited':
-        logEvent('auth.login.rate_limited', requestId);
-        return errorResponse(
-          429,
-          'RATE_LIMITED',
-          'Zbyt wiele prób logowania. Spróbuj ponownie później',
-          { 'Retry-After': String(result.retryAfterSeconds) },
-        );
       case 'invalid_credentials':
         logEvent('auth.login.failure', requestId);
         // The same status, code and text for every reason, so the body is byte-identical.

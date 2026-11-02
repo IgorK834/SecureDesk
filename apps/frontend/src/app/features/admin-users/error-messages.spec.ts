@@ -3,7 +3,7 @@ import '@angular/compiler';
 import { HttpErrorResponse } from '@angular/common/http';
 import { describe, expect, it } from 'vitest';
 import { apiFailure } from '../../__fixtures__/admin-users';
-import { describeApiError } from '../../core/http/api-error';
+import { apiErrorDetails, describeApiError } from '../../core/http/api-error';
 import { actionErrorMessage } from './error-messages';
 
 describe('describeApiError', () => {
@@ -25,6 +25,38 @@ describe('describeApiError', () => {
   it('reports status 0 for anything that is not an HTTP answer (a network failure, a bug)', () => {
     expect(describeApiError(new Error('boom'))).toStrictEqual({ status: 0 });
     expect(describeApiError(undefined)).toStrictEqual({ status: 0 });
+  });
+});
+
+describe('apiErrorDetails', () => {
+  it('returns only a non-negative integer duration and a strict UTC ISO timestamp', () => {
+    const error = new HttpErrorResponse({
+      status: 429,
+      error: {
+        error: {
+          details: {
+            retryAfterSeconds: 872,
+            lockedUntil: '2026-03-10T12:15:00.000Z',
+            attackerControlled: '<script>',
+          },
+        },
+      },
+    });
+
+    expect(apiErrorDetails(error)).toStrictEqual({
+      retryAfterSeconds: 872,
+      lockedUntil: '2026-03-10T12:15:00.000Z',
+    });
+  });
+
+  it.each([
+    { retryAfterSeconds: -1, lockedUntil: 'tomorrow' },
+    { retryAfterSeconds: 1.5, lockedUntil: 123 },
+    { retryAfterSeconds: '30', lockedUntil: '2026-03-10T12:15:00Z' },
+  ])('rejects malformed detail values %#', (details) => {
+    const error = new HttpErrorResponse({ status: 429, error: { error: { details } } });
+
+    expect(apiErrorDetails(error)).toStrictEqual({});
   });
 });
 

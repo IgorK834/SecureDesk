@@ -112,6 +112,9 @@ const PROTECTED_NOTE = 'The permanent ADMIN account is protected: it cannot be b
                 Reset password
               </button>
             }
+            @if (user.lockedUntil && auth.has('users:unlock')) {
+              <button type="button" [disabled]="busy()" (click)="unlock(user)">Unlock</button>
+            }
             @if (auth.has('users:block')) {
               @if (user.isBlocked) {
                 <button type="button" [disabled]="busy()" (click)="toggleBlock(user)">
@@ -289,6 +292,20 @@ export class UserDetailComponent {
         reason: 'reset',
       });
     });
+  }
+
+  protected async unlock(user: AdminUser): Promise<void> {
+    const confirmed = await this.confirm.open({
+      title: 'Unlock this account?',
+      message: `${user.login} will be able to attempt a sign-in immediately. Its failed-login counter will start from zero.`,
+      confirmLabel: 'Unlock account',
+    });
+    if (confirmed) {
+      this.act(this.api.unlock(user.id), (updated) => {
+        this.state.set({ kind: 'ready', user: updated });
+        this.notice.set('Account unlocked. Its failed-login counter was cleared.');
+      });
+    }
   }
 
   protected async remove(user: AdminUser): Promise<void> {

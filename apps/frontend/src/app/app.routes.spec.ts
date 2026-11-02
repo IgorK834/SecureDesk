@@ -135,7 +135,13 @@ describe('signed-in user on /login', () => {
 });
 
 describe('role-specific pages (Angular guards, UX only)', () => {
-  const ADMIN_URLS = ['/admin/users', '/admin/users/new', '/admin/users/42', '/admin/security'];
+  const ADMIN_URLS = [
+    '/admin/users',
+    '/admin/users/new',
+    '/admin/users/42',
+    '/admin/security',
+    '/admin/ip-blocks',
+  ];
   const TICKET_URLS = ['/tickets', '/tickets/new', '/tickets/42'];
 
   describe.each(['MANAGER', 'EMPLOYEE', 'GUEST'] as Role[])('%s', (role) => {

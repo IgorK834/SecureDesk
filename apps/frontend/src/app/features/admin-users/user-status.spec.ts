@@ -16,6 +16,15 @@ describe('userStatus', () => {
     ['an ordinary account', { isBlocked: false, mustChangePassword: false }, 'active'],
     ['a blocked account', { isBlocked: true, mustChangePassword: false }, 'blocked'],
     [
+      'a temporarily locked account',
+      {
+        isBlocked: false,
+        lockedUntil: '2030-01-01T12:15:00.000Z',
+        mustChangePassword: false,
+      },
+      'locked',
+    ],
+    [
       'an account owing its first password',
       { isBlocked: false, mustChangePassword: true },
       'pending',
@@ -34,9 +43,10 @@ describe('userStatus', () => {
     expect(STATUS_LABELS).toStrictEqual({
       active: 'Active',
       blocked: 'Blocked',
+      locked: 'Locked',
       pending: 'Pending first login',
     });
-    expect(new Set(Object.values(STATUS_LABELS)).size).toBe(3);
+    expect(new Set(Object.values(STATUS_LABELS)).size).toBe(4);
   });
 
   it('has a label for each of the four roles', () => {

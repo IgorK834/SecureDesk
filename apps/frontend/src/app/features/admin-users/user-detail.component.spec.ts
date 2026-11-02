@@ -24,7 +24,7 @@ class ListStub {}
 
 const PROTECTED_TITLE =
   'The permanent ADMIN account is protected: it cannot be blocked or deleted.';
-const ALL = ['users:read', 'users:update', 'users:block', 'users:delete'];
+const ALL = ['users:read', 'users:update', 'users:block', 'users:delete', 'users:unlock'];
 const WITH_RESET = [...ALL, 'users:reset-password'];
 
 const SECRET = 'k9#Tq2!vXm7@Lp4w';
@@ -40,6 +40,11 @@ const BLOCKED = adminUser({
   lastName: 'Lis',
   isBlocked: true,
 });
+const LOCKED = adminUser({
+  id: 'u-3',
+  login: 'locked.user',
+  lockedUntil: '2030-01-01T12:15:00.000Z',
+});
 const ADMIN = adminUser({
   id: 'u-admin',
   login: 'ADMIN',
@@ -53,6 +58,7 @@ interface Overrides {
   get?: (id: string) => Observable<AdminUser>;
   block?: (id: string) => Observable<AdminUser>;
   unblock?: (id: string) => Observable<AdminUser>;
+  unlock?: (id: string) => Observable<AdminUser>;
   delete?: (id: string) => Observable<void>;
   resetPassword?: (id: string) => Observable<PasswordReset>;
   update?: (id: string, changes: UpdateUserRequest) => Observable<AdminUser>;
@@ -64,6 +70,7 @@ async function open(url: string, overrides: Overrides = {}) {
     get: vi.fn(overrides.get ?? ((id: string) => of(adminUser({ ...ACTIVE, id })))),
     block: vi.fn(overrides.block ?? ((id: string) => of(adminUser({ id, isBlocked: true })))),
     unblock: vi.fn(overrides.unblock ?? ((id: string) => of(adminUser({ id, isBlocked: false })))),
+    unlock: vi.fn(overrides.unlock ?? ((id: string) => of(adminUser({ id, lockedUntil: null })))),
     delete: vi.fn(overrides.delete ?? (() => of(undefined as void))),
     resetPassword: vi.fn(overrides.resetPassword ?? ((): Observable<PasswordReset> => of(RESET))),
     update: vi.fn(
@@ -374,6 +381,40 @@ describe('UserDetailComponent: unblocking', () => {
       'Something went wrong. Try again.',
     );
     expect(t.root.querySelector('app-user-status-badge')?.textContent).toContain('Blocked');
+  });
+});
+
+describe('UserDetailComponent: unlocking a failed-login lock', () => {
+  it('shows Unlock for a locked account when the permission is present', async () => {
+    const allowed = await open('/admin/users/u-3', { get: () => of(LOCKED) });
+
+    expect(allowed.button('Unlock')).toBeDefined();
+  });
+
+  it('hides Unlock without the permission', async () => {
+    const readOnly = await open('/admin/users/u-3', {
+      get: () => of(LOCKED),
+      granted: ['users:read'],
+    });
+
+    expect(readOnly.button('Unlock')).toBeUndefined();
+  });
+
+  it('confirms, clears the visible lock, and reports that the counter was reset', async () => {
+    const t = await open('/admin/users/u-3', { get: () => of(LOCKED) });
+
+    t.button('Unlock')?.click();
+    await t.settle();
+    expect(t.confirmDialog().textContent).toContain('counter will start from zero');
+    expect(t.api.unlock).not.toHaveBeenCalled();
+
+    [...t.confirmDialog().querySelectorAll('button')]
+      .find((button) => button.className === 'confirm')
+      ?.click();
+    await t.settle();
+    expect(t.api.unlock).toHaveBeenCalledExactlyOnceWith('u-3');
+    expect(t.button('Unlock')).toBeUndefined();
+    expect(t.text()).toContain('failed-login counter was cleared');
   });
 });
 

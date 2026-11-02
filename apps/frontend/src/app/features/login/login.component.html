@@ -40,10 +40,15 @@
     <div class="request-error" role="alert" aria-live="polite">
       @if (errorMessage(); as text) {
         <p>{{ text }}</p>
+      } @else if (countdownMessage(); as text) {
+        <p>
+          <span aria-hidden="true">{{ text }}</span>
+          <span class="visually-hidden">{{ countdownAnnouncement() }}</span>
+        </p>
       }
     </div>
 
-    <button type="submit" [disabled]="submitting()">
+    <button type="submit" [disabled]="submitting() || countdownActive()">
       @if (submitting()) {
         <span class="spinner" aria-hidden="true"></span>
         Signing in…

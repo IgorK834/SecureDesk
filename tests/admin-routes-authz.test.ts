@@ -111,6 +111,9 @@ describe('the admin routes the matrix covers', () => {
         'POST /api/admin/users/[id]/reset-totp',
         'GET /api/admin/security-settings',
         'PATCH /api/admin/security-settings',
+        'GET /api/admin/ip-blocks',
+        'DELETE /api/admin/ip-blocks/[ipKey]',
+        'POST /api/admin/users/[id]/unlock',
       ].sort(),
     );
   });

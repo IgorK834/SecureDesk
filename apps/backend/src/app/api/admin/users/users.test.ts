@@ -76,6 +76,7 @@ const DTO_KEYS = [
   'id',
   'isBlocked',
   'lastName',
+  'lockedUntil',
   'login',
   'mustChangePassword',
   'passwordChangedAt',

@@ -13,6 +13,7 @@ export function adminUser(overrides: Partial<AdminUser> = {}): AdminUser {
     lastName: 'Wiśniewska',
     role: 'EMPLOYEE',
     isBlocked: false,
+    lockedUntil: null,
     mustChangePassword: false,
     temporaryPasswordExpiresAt: null,
     passwordChangedAt: '2030-01-02T10:00:00.000Z',

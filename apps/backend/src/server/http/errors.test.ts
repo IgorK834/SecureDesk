@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AccountLockedError,
   ApiError,
+  CaptchaFailedError,
+  CaptchaRequiredError,
+  CaptchaUnavailableError,
   ConflictError,
   ForbiddenError,
+  IpBlockedError,
   NotFoundError,
+  PasswordChangeLockedError,
   PasswordChangeRequiredError,
   UnauthorizedError,
   ValidationError,
@@ -49,6 +55,21 @@ describe('ApiError', () => {
       'ApiError',
     ]);
   });
+
+  it('carries optional response headers independently of fixed details', () => {
+    const error = new ApiError(
+      429,
+      'LIMIT',
+      'wait',
+      { retryAfterSeconds: 30 },
+      {
+        'Retry-After': '30',
+      },
+    );
+
+    expect(error.details).toStrictEqual({ retryAfterSeconds: 30 });
+    expect(error.headers).toStrictEqual({ 'Retry-After': '30' });
+  });
 });
 
 // The status/code pairs are the API contract the Angular client branches on, so each is pinned.
@@ -72,6 +93,48 @@ describe('the named refusals', () => {
     ],
     ['ConflictError', new ConflictError(), 409, 'CONFLICT', 'Zasób już istnieje'],
     ['NotFoundError', new NotFoundError(), 404, 'NOT_FOUND', 'Nie znaleziono zasobu'],
+    [
+      'AccountLockedError',
+      new AccountLockedError(new Date('2026-03-10T12:15:00.000Z'), 900),
+      429,
+      'AUTH_ACCOUNT_LOCKED',
+      'Konto jest tymczasowo zablokowane po zbyt wielu nieudanych próbach logowania',
+    ],
+    [
+      'IpBlockedError',
+      new IpBlockedError(30),
+      429,
+      'AUTH_IP_BLOCKED',
+      'Zbyt wiele nieudanych prób logowania z tego adresu. Spróbuj ponownie później',
+    ],
+    [
+      'PasswordChangeLockedError',
+      new PasswordChangeLockedError(new Date('2026-03-10T12:15:00.000Z'), 900),
+      429,
+      'AUTH_PASSWORD_CHANGE_LOCKED',
+      'Zmiana hasła jest tymczasowo zablokowana po zbyt wielu nieudanych próbach',
+    ],
+    [
+      'CaptchaRequiredError',
+      new CaptchaRequiredError(),
+      400,
+      'CAPTCHA_REQUIRED',
+      'Wymagane potwierdzenie CAPTCHA',
+    ],
+    [
+      'CaptchaFailedError',
+      new CaptchaFailedError(),
+      403,
+      'CAPTCHA_FAILED',
+      'Nie udało się zweryfikować CAPTCHA',
+    ],
+    [
+      'CaptchaUnavailableError',
+      new CaptchaUnavailableError(),
+      503,
+      'CAPTCHA_UNAVAILABLE',
+      'Weryfikacja CAPTCHA jest chwilowo niedostępna',
+    ],
   ])('%s maps to its status, code and message', (_, error, status, code, message) => {
     expect(error).toBeInstanceOf(ApiError);
     expect([error.status, error.code, error.message]).toStrictEqual([status, code, message]);

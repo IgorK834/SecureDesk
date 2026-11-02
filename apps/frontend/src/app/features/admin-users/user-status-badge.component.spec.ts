@@ -7,6 +7,11 @@ import type { AdminUser } from '../../core/http/admin-api.service';
 import { UserStatusBadgeComponent } from './user-status-badge.component';
 
 const NOW = new Date('2030-01-01T12:00:00.000Z');
+const LOCKED_TIME = new Intl.DateTimeFormat('en-GB', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+}).format(new Date('2030-01-01T12:15:00.000Z'));
 
 afterEach(() => vi.useRealTimers());
 
@@ -21,22 +26,28 @@ describe('UserStatusBadgeComponent', () => {
   it.each([
     ['active', adminUser(), 'Active'],
     ['blocked', adminUser({ isBlocked: true }), 'Blocked'],
+    [
+      'locked',
+      adminUser({ lockedUntil: '2030-01-01T12:15:00.000Z' }),
+      `Locked until ${LOCKED_TIME}`,
+    ],
     ['pending', adminUser({ mustChangePassword: true }), 'Pending first login'],
   ])('writes a %s account out as "%s"', (state, user, label) => {
     const badge = render(user).querySelector('.badge');
 
-    expect(badge?.textContent).toBe(label);
+    expect(badge?.textContent?.trim()).toBe(label);
     expect(badge?.classList.contains(`badge-${state}`)).toBe(true);
   });
 
-  it('gives the three states three different looks as well as three different words', () => {
+  it('gives the four states four different looks as well as four different words', () => {
     const classes = [
       adminUser(),
       adminUser({ isBlocked: true }),
+      adminUser({ lockedUntil: '2030-01-01T12:15:00.000Z' }),
       adminUser({ mustChangePassword: true }),
     ].map((user) => render(user).querySelector('.badge')?.className);
 
-    expect(new Set(classes).size).toBe(3);
+    expect(new Set(classes).size).toBe(4);
   });
 
   it('flags a pending account whose temporary password has expired', () => {
@@ -69,7 +80,7 @@ describe('UserStatusBadgeComponent', () => {
 
     const page = render(user);
 
-    expect(page.querySelector('.badge')?.textContent).toBe('Blocked');
+    expect(page.querySelector('.badge')?.textContent?.trim()).toBe('Blocked');
     expect(page.textContent).not.toContain('expired');
   });
 });

@@ -279,7 +279,7 @@ describe('UsersListComponent: filters and the 300 ms pause', () => {
 
     expect(options).toStrictEqual([
       ['All roles', 'Administrator', 'Manager', 'Employee', 'Guest'],
-      ['All statuses', 'Active', 'Blocked', 'Pending first login'],
+      ['All statuses', 'Active', 'Blocked', 'Locked', 'Pending first login'],
     ]);
   });
 

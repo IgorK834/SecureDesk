@@ -137,6 +137,7 @@ describe('toAdminUserDto', () => {
       lastName: 'Wiśniewska',
       role: 'EMPLOYEE',
       isBlocked: false,
+      lockedUntil: null,
       mustChangePassword: true,
       temporaryPasswordExpiresAt: row.temporaryPasswordExpiresAt,
       passwordChangedAt: row.passwordChangedAt,
@@ -162,9 +163,9 @@ describe('toAdminUserDto', () => {
 
   it('accounts for every users column: each is either exposed or explicitly withheld', () => {
     // `roleId` is exposed as `role`.
-    const exposed = Object.keys(toAdminUserDto(row)).map((key) =>
-      key === 'role' ? 'roleId' : key,
-    );
+    const exposed = Object.keys(toAdminUserDto(row))
+      .filter((key) => key !== 'lockedUntil')
+      .map((key) => (key === 'role' ? 'roleId' : key));
     const columns = Object.keys(getTableColumns(users));
 
     expect([...exposed, ...ADMIN_WITHHELD].sort()).toEqual([...columns].sort());

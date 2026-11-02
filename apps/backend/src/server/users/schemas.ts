@@ -12,7 +12,7 @@ export type RoleCode = (typeof ROLE_CODES)[number];
 export const roleIdOf = (code: RoleCode): RoleId => code.toLowerCase() as Lowercase<RoleCode>;
 
 /** `pending` is an account that has not yet replaced its administrator-issued password. */
-export const USER_STATUSES = ['active', 'blocked', 'pending'] as const;
+export const USER_STATUSES = ['active', 'blocked', 'locked', 'pending'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
 export const DEFAULT_PAGE_SIZE = 20;
