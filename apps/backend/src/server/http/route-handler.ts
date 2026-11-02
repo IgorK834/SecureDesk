@@ -104,7 +104,13 @@ function toResponse(name: string, requestId: string, error: unknown): Response {
   const refusal = error instanceof DbConflictError ? new ConflictError() : error;
   if (refusal instanceof ApiError) {
     logEvent(`${name}.denied`, requestId);
-    return errorResponse(refusal.status, refusal.code, refusal.message, undefined, refusal.details);
+    return errorResponse(
+      refusal.status,
+      refusal.code,
+      refusal.message,
+      refusal.headers,
+      refusal.details,
+    );
   }
   logEvent(`${name}.error`, requestId);
   return errorResponse(500, 'INTERNAL_ERROR', 'Wystąpił błąd serwera');
