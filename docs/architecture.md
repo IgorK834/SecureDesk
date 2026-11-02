@@ -70,23 +70,25 @@ used in the OWASP examples.
 ## Login and sessions
 
 `POST /api/auth/login` (`apps/backend/src/app/api/auth/login/route.ts`, logic in
-`server/auth/login-service.ts`). Body: `{ "login": "...", "password": "..." }`, JSON only; any
-other `Content-Type` is refused, because a cross-site HTML form can send `text/plain` without a CORS
-preflight and could otherwise sign a victim into the attacker's account (login CSRF).
+`server/auth/login-service.ts`). The strict JSON body contains `login`, `password` and the optional
+Module 2 fields `captcha`, `website` and `formToken`; any other `Content-Type` is refused, because a
+cross-site HTML form can send `text/plain` without a CORS preflight and could otherwise sign a
+victim into the attacker's account (login CSRF).
 
 ### Flow
 
 1. The body is validated (strict schema; the login is trimmed and at most 64 characters, the
    password is at most 1024 characters and is **never** trimmed or normalized).
-2. The per-process sliding-window limiter counts the client address (30 attempts per 15 minutes)
-   and checks the address plus normalized submitted login (5 failures per 15 minutes).
+2. `login-guard.ts` runs the fixed defence pipeline below and atomically reserves the one allowed
+   credential verification. A refusal before the reservation performs no Argon2 work.
 3. The account is looked up by normalized login, ignoring soft-deleted accounts.
-4. **Exactly one** Argon2id verification happens, against the stored hash or, for an unknown
+4. **Exactly one** Argon2id verification happens for a reserved attempt, against the stored hash or, for an unknown
    login, against `getDummyHash()`, so response time does not show whether the login exists.
    `getDummyHash()` is asked for on every attempt, known login or not: the first call in a process
    computes it, and that extra hash must not be paid only by unknown logins.
 5. A blocked account, a wrong password, an unknown or deleted login and an expired temporary
-   password all give the same result.
+   password all resolve the reservation as `FAILED` and give the same 401 until the threshold is
+   crossed. A valid credential resolves it as `SUCCESS`, resetting the account counter.
 6. The session stage is chosen: `INITIAL_PASSWORD_CHANGE` while `must_change_password` is set,
    otherwise `PASSWORD_EXPIRED` if `password_max_age_days` is set and exceeded, otherwise
    `TOTP_CHALLENGE` when TOTP is enabled, or `FULLY_AUTHENTICATED` when no second factor is due.
@@ -107,26 +109,56 @@ no `password_changed_at`, it counts as expired.
 | 401    | `AUTH_INVALID_CREDENTIALS` | Every credential failure; byte-identical body and headers          |
 | 413    | `PAYLOAD_TOO_LARGE`        | The body is over 16,384 bytes                                      |
 | 415    | `UNSUPPORTED_MEDIA_TYPE`   | The media type is not `application/json`                           |
-| 429    | `RATE_LIMITED`             | A login window is exhausted (`Retry-After` is sent)                |
+| 429    | `AUTH_ACCOUNT_LOCKED`      | Login threshold crossed; numeric/ISO details and `Retry-After`     |
+| 429    | `AUTH_IP_BLOCKED`          | Address window exhausted; numeric details and `Retry-After`        |
+| 400    | `CAPTCHA_REQUIRED`         | CAPTCHA proof is absent (when that stage is implemented)           |
+| 403    | `CAPTCHA_FAILED`           | CAPTCHA proof is invalid, expired or replayed                      |
+| 503    | `CAPTCHA_UNAVAILABLE`      | CAPTCHA provider cannot verify; authentication fails closed        |
 | 500    | `INTERNAL_ERROR`           | Anything unexpected; nothing about the cause is returned or logged |
 
 Every response is `Cache-Control: no-store`. Logging is limited to an event name and a request id
 (`server/security/log-event.ts`, filtered by `redact.ts`); request bodies, passwords, hashes,
 tokens and error messages (which can embed query parameters) are never logged.
 
-### Login throttling
+### Login defence pipeline and lockout contract
 
-`server/security/login-rate-limiter.ts` uses two sliding windows. The address-wide window admits
-30 attempts in 15 minutes. The address-plus-normalized-login window admits five failed attempts;
-the sixth is refused even when the submitted login does not name an account. It is checked before
-the account lookup and records the submitted string for every credential failure, so the status,
-body and `Retry-After` do not disclose account existence. A successful login does not consume the
-failure window. Separating the second key by address prevents one remote address from locking a
-victim out everywhere.
+The order is fixed and stops at the first refusal: **honeypot → IP block → CAPTCHA → honeytoken →
+account lock → credential verification**. The unimplemented honeypot, CAPTCHA and honeytoken
+stages are explicit pass-through stages rather than hidden hooks.
 
-The store is an in-memory `Map`, so it is **per-process and lost on restart**. A horizontally
-scaled or restart-resilient deployment must replace it with a shared, atomic store such as Redis.
-(Module 2 replaces this limiter for login with SQLite-backed tracking; see the backlog.)
+The IP stage derives its block from append-only `login_attempts`, before CAPTCHA work. It counts
+`PENDING` and `FAILED` rows of every kind for one `ip_key` in the 15-minute window, but only after
+the newest IP-level `CLEARED` marker. With the default limit 20, the first 20 failures are admitted
+and the 21st request receives `429 AUTH_IP_BLOCKED`; rows survive process restarts. A refusal emits
+the aggregated `LOGIN_IP_BLOCKED` event. CAPTCHA failures and honeypot hits use the same
+`recordIpFailure` insertion point. A failed credential that reaches eight distinct normalized
+logins for the address emits `PASSWORD_SPRAYING_SUSPECTED` once per five-minute event bucket.
+
+The account-lock stage uses append-only `login_attempts` rows. Its `BEGIN IMMEDIATE` transaction
+counts recent `PENDING` and `FAILED` credential rows after the last `SUCCESS` or `CLEARED` marker,
+then inserts a reservation. This makes the administrator's `maxFailedLoginAttempts` setting
+persistent and prevents a parallel burst from starting more than that many Argon2 verifications.
+Only resolved failures cross the threshold. The N-th failure and every request during the next 15
+minutes receive `429 AUTH_ACCOUNT_LOCKED`; a correct password is not verified while locked and
+does not extend the end. At exactly 15 minutes a new attempt may be reserved. The transition emits
+one `ACCOUNT_LOCKED` security event and never changes `users.is_blocked`. Local recovery appends a
+`CLEARED` marker with `npm run admin:unlock -- ADMIN`.
+
+The 429 body contains only fixed fields:
+
+```json
+{
+  "error": {
+    "code": "AUTH_ACCOUNT_LOCKED",
+    "message": "Konto jest tymczasowo zablokowane po zbyt wielu nieudanych próbach logowania",
+    "details": { "lockedUntil": "2026-03-10T12:15:00.000Z", "retryAfterSeconds": 900 }
+  }
+}
+```
+
+`Retry-After` carries the same whole-second duration. `AUTH_IP_BLOCKED` has only
+`details.retryAfterSeconds`. CAPTCHA refusals have no details. `RATE_LIMITED` remains the contract
+for TOTP and public CAPTCHA endpoints, not for login.
 
 ### Client address
 
@@ -153,6 +185,13 @@ it saw, not append to what the client sent. Each further trusted proxy in a chai
 proxy) while `TRUST_PROXY=true` lets a client choose its own address. In development the Angular
 dev-server proxy sets `xfwd: true` (`apps/frontend/proxy.conf.json`) and `.env.example` sets
 `TRUST_PROXY=true`, `TRUSTED_PROXY_HOPS=1`, so local per-IP tests see a real address.
+
+**NAT/shared-address trade-off:** an IP key identifies an address, not a person. Offices, schools,
+carrier-grade NATs and privacy relays can put many legitimate users in one bucket, so one noisy
+client can temporarily block everyone behind that address. Raising `ipFailedAttemptLimit` reduces
+that denial-of-service risk but gives password spraying more room. The separate per-login lock and
+the spraying signal remain necessary; the address limit must not be treated as identity proof.
+Administrators can inspect and clear live address blocks, and the clear is audited.
 
 ## CSRF protection
 
@@ -343,6 +382,9 @@ permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `
 | `POST /api/admin/users/[id]/unblock`        | `users:block`          | `200` the account, also when it was not blocked                                      |
 | `POST /api/admin/users/[id]/reset-password` | `users:reset-password` | `200 { temporaryPassword: { value, expiresAt } }` (`404` if missing or soft-deleted) |
 | `POST /api/admin/users/[id]/reset-totp`     | `users:reset-totp`     | `204`; clears TOTP and revokes the target's sessions after identity verification     |
+| `POST /api/admin/users/[id]/unlock`         | `users:unlock`         | `200` the account; appends a login-level `CLEARED` marker                            |
+| `GET /api/admin/ip-blocks`                  | `ip-blocks:read`       | `200 { items }` with active address blocks                                           |
+| `DELETE /api/admin/ip-blocks/[ipKey]`       | `ip-blocks:clear`      | `204`; appends an IP-level `CLEARED` marker                                          |
 
 - **Strict allowlists both ways.** Responses are built by `toAdminUserDto` from named columns
   (the query never loads `password_hash`); request bodies and queries are strict Zod schemas
@@ -355,9 +397,9 @@ permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `
   match themselves. SQLite's `LIKE` ignores case for ASCII letters only: the login is compared in
   its normalized form (`normalizeLogin`), but a name containing, say, `Ł` is matched by `Ł`, not `ł`.
   Soft-deleted accounts are in no list, count or lookup.
-- **Status.** `blocked` is `is_blocked`; `pending` is not blocked and still owes the first password
-  change (`must_change_password`); `active` is neither. The three partition the live accounts: an
-  account that is blocked _and_ pending counts as `blocked`. The UI adds an "expired temporary
+- **Status.** `blocked` is `is_blocked`; `locked` is a live failed-login lock; `pending` is neither
+  and still owes the first password change (`must_change_password`); `active` is none of those.
+  Administrative blocking takes precedence if states overlap. The UI adds an "expired temporary
   password" hint when `temporaryPasswordExpiresAt` is in the past.
 - **Create.** The temporary password is issued and hashed first (hashing is asynchronous, a
   better-sqlite3 transaction is not) and the row is then written by one `INSERT`, atomic by
@@ -382,6 +424,9 @@ permission, so a Manager, Employee or Guest gets `403` and an anonymous caller `
   it. The answer is `no-store`; the plaintext is in that body only, never in a log or a table.
   Afterwards the user's old password no longer signs in, the previous regular password cannot be
   chosen again, and the temporary one must be replaced through `change-initial-password`.
+- **Unlock and address clear.** Both actions append a `CLEARED` marker instead of deleting attempt
+  history. Unlock is idempotent and returns `lockedUntil: null`; the next login starts at zero.
+  They emit `ACCOUNT_UNLOCKED_BY_ADMIN` and `IP_BLOCK_CLEARED_BY_ADMIN` with the acting admin id.
 - **Resetting the permanent `ADMIN` account is allowed**, like any other (a decision, not an
   oversight; the alternative was `409 PROTECTED_ACCOUNT`). Only ADMIN can do it, so it ends ADMIN's
   own session, and the new password lapses after 12 hours like every reset password. Two
@@ -397,7 +442,8 @@ PROTECTED_ACCOUNT` (`assertNotProtectedAccount`). The service checks first so th
   proper error; the triggers in migration `0001` refuse the same changes if a bug ever gets past it.
 - **Screens** (`apps/frontend/.../features/admin-users`, typed client `core/http/admin-api.service.ts`):
   the list at `/admin/users`, the account at `/admin/users/:id` (edit, reset password, block,
-  unblock, delete) and `/admin/users/new`. Which buttons appear follows `AuthService.has()` and the
+  unblock, unlock, delete) and `/admin/users/new`, plus `/admin/ip-blocks` for live address blocks.
+  Which buttons appear follows `AuthService.has()` and the
   Block and Delete buttons are disabled for the `ADMIN` login with the reason as a tooltip; both
   are only a convenience, the server answers every call (`403`, `404`, `409` are shown as
   messages). Reset password stays available for `ADMIN`. Reset, block, unblock and delete ask first
@@ -521,9 +567,14 @@ AUTH_TEMPORARY_PASSWORD_EXPIRED`.
 | 400    | `PASSWORD_REUSED`                   | equal to the current password or one of the five previous regular ones                                             |
 | 401    | `AUTH_TEMPORARY_PASSWORD_EXPIRED`   | `change-initial-password` after the 12-hour deadline; the session is revoked                                       |
 | 409    | `PASSWORD_CHANGE_ALREADY_COMPLETED` | the credential changed while the request was running                                                               |
+| 429    | `AUTH_PASSWORD_CHANGE_LOCKED`       | five wrong current passwords; all sessions revoked and further tries refused for 15 minutes                        |
 
 Both endpoints pass through the shared origin and session-bound XSRF checks. Login throttling is
-separate from current-password validation: password policy, history and the old credential remain
+separate from current-password validation. Ordinary `change-password` reserves persistent
+`PASSWORD_CHANGE` attempts after CAPTCHA and before Argon2 verification. Its N-th failure revokes
+all of the user's sessions and emits `CHANGE_PASSWORD_BRUTE_FORCE`; the refusal remains active for
+15 minutes even if a new session submits the correct current password. These rows never contribute
+to the login-level account lock, while the password policy, history and old credential remain
 authoritative server-side checks inside the password-change transaction.
 
 ## Security settings
