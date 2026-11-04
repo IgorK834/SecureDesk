@@ -27,11 +27,17 @@ import {
 import { defineRoute } from '../../../../server/http/route-handler';
 import { PERMISSIONS } from '../../../../server/permissions/codes';
 import { csrfTokenForSession } from '../../../../server/security/csrf';
+import { verifyCaptchaOrThrow } from '../../../../server/security/captcha';
 import { POST as changePassword } from '../change-password/route';
 import { POST as login } from '../login/route';
 import { POST as logout } from '../logout/route';
 import { GET as me } from '../me/route';
 import { POST, dynamic, runtime } from './route';
+
+vi.mock('../../../../server/security/captcha', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../server/security/captcha')>();
+  return { ...actual, verifyCaptchaOrThrow: vi.fn(() => Promise.resolve()) };
+});
 
 // These tests drive the real route handlers, the real guards, the real Argon2id hashing and the
 // in-memory test database: what is asserted is what a client can observe over HTTP, plus the
@@ -78,6 +84,7 @@ beforeEach(async () => {
   });
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
   vi.mocked(hashPassword).mockClear();
+  vi.mocked(verifyCaptchaOrThrow).mockResolvedValue();
 });
 
 afterEach(() => {

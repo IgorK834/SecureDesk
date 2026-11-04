@@ -9,6 +9,7 @@ test.describe('failed login evidence (SEC-01)', () => {
   ] as const) {
     test(`${name} shows the same neutral message`, async ({ page }) => {
       await page.goto('/login');
+      await page.getByLabel('Reversed characters').fill('TEST-SOLVED');
       await page
         .getByLabel('Login')
         .fill(loginName === 'known-user' ? credentials().employee.login : loginName);

@@ -4,6 +4,7 @@ import type { AppDb } from '../db/connection';
 import { loginAttempts, securityEvents, securitySettings, sessions, users } from '../db/schema';
 import { AccountLockedError } from '../http/errors';
 import { ROLES } from '../permissions/codes';
+import { verifyCaptchaOrThrow } from '../security/captcha';
 import { setClockForTests } from '../time/clock';
 import { authenticate } from './login-service';
 import { getDummyHash, hashPassword, verifyPassword } from './password-hasher';
@@ -18,6 +19,10 @@ vi.mock('./password-hasher', async (importOriginal) => {
     verifyPassword: vi.fn(actual.verifyPassword),
     getDummyHash: vi.fn(actual.getDummyHash),
   };
+});
+vi.mock('../security/captcha', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../security/captcha')>();
+  return { ...actual, verifyCaptchaOrThrow: vi.fn(() => Promise.resolve()) };
 });
 
 const PASSWORD = 'Correct horse battery staple';
@@ -39,6 +44,7 @@ beforeEach(() => {
   setClockForTests({ now: () => now });
   vi.mocked(verifyPassword).mockClear();
   vi.mocked(getDummyHash).mockClear();
+  vi.mocked(verifyCaptchaOrThrow).mockResolvedValue();
 });
 
 afterEach(() => {

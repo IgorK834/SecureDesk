@@ -1,4 +1,4 @@
-import { Component, DestroyRef, OnDestroy, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnDestroy, ViewChild, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -7,12 +7,14 @@ import type { PasswordPolicy } from '../../core/auth/auth.models';
 import { AuthService } from '../../core/auth/auth.service';
 import { describeApiError } from '../../core/http/api-error';
 import { ApiClient } from '../../core/http/api-client.service';
+import { CaptchaComponent } from '../../shared/ui/captcha/captcha.component';
+import type { CaptchaProof } from '../../shared/ui/captcha/captcha-api.service';
 import { passwordsMatch, policyViolationMessages } from './password-form';
 
 /** Replaces an administrator-issued temporary password before any product page can be used. */
 @Component({
   selector: 'app-change-initial-password',
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, CaptchaComponent],
   template: `
     <main class="password-page">
       <h1>Set your password</h1>
@@ -83,7 +85,9 @@ import { passwordsMatch, policyViolationMessages } from './password-form';
           }
         </div>
 
-        <button type="submit" [disabled]="submitting() || form.invalid">
+        <app-captcha purpose="change-password" (tokenChange)="captchaProof.set($event)" />
+
+        <button type="submit" [disabled]="submitting() || form.invalid || !captchaProof()">
           {{ submitting() ? 'Saving…' : 'Set password' }}
         </button>
       </form>
@@ -92,6 +96,9 @@ import { passwordsMatch, policyViolationMessages } from './password-form';
   styleUrl: './password-form.scss',
 })
 export class ChangeInitialPasswordComponent implements OnDestroy {
+  @ViewChild(CaptchaComponent)
+  private captchaWidget?: CaptchaComponent;
+
   private readonly api = inject(AuthApiService);
   private readonly meApi = inject(ApiClient);
   private readonly auth = inject(AuthService);
@@ -111,6 +118,7 @@ export class ChangeInitialPasswordComponent implements OnDestroy {
   protected readonly submitted = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
   protected readonly violations = signal<readonly string[]>([]);
+  protected readonly captchaProof = signal<CaptchaProof | null>(null);
 
   constructor() {
     if (!this.policy()) this.loadPolicy();
@@ -122,16 +130,18 @@ export class ChangeInitialPasswordComponent implements OnDestroy {
 
   protected submit(): void {
     this.submitted.set(true);
-    if (this.submitting() || this.form.invalid) return;
+    const captcha = this.captchaProof();
+    if (this.submitting() || this.form.invalid || !captcha) return;
 
     this.submitting.set(true);
     this.errorMessage.set(null);
     this.violations.set([]);
     this.api
-      .changeInitialPassword(this.form.getRawValue())
+      .changeInitialPassword({ ...this.form.getRawValue(), captcha })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
+          this.resetCaptcha();
           this.auth.setSession(response);
           this.form.reset();
           this.submitting.set(false);
@@ -139,7 +149,10 @@ export class ChangeInitialPasswordComponent implements OnDestroy {
             response.authStage === 'TOTP_CHALLENGE' ? '/totp-challenge' : '/dashboard',
           );
         },
-        error: (error: unknown) => this.handleFailure(error),
+        error: (error: unknown) => {
+          this.resetCaptcha(describeApiError(error).code === 'CAPTCHA_UNAVAILABLE');
+          this.handleFailure(error);
+        },
       });
   }
 
@@ -176,7 +189,13 @@ export class ChangeInitialPasswordComponent implements OnDestroy {
   private handleFailure(error: unknown): void {
     this.submitting.set(false);
     const { status, code } = describeApiError(error);
-    if (code === 'PASSWORD_POLICY_VIOLATION') {
+    if (code === 'CAPTCHA_REQUIRED') {
+      this.errorMessage.set('Complete the verification.');
+    } else if (code === 'CAPTCHA_FAILED') {
+      this.errorMessage.set('Verification failed. Try again.');
+    } else if (code === 'CAPTCHA_UNAVAILABLE') {
+      this.errorMessage.set('Verification is temporarily unavailable.');
+    } else if (code === 'PASSWORD_POLICY_VIOLATION') {
       this.violations.set(policyViolationMessages(error, this.policy()?.minPasswordLength ?? 12));
     } else if (code === 'PASSWORD_REUSED') {
       this.errorMessage.set('Choose a password you have not used recently.');
@@ -190,6 +209,11 @@ export class ChangeInitialPasswordComponent implements OnDestroy {
     } else {
       this.errorMessage.set('Could not change the password. Try again later.');
     }
+  }
+
+  private resetCaptcha(reselectProvider = false): void {
+    this.captchaWidget?.reset(reselectProvider);
+    this.captchaProof.set(null);
   }
 
   private goToLogin(reason: string): void {

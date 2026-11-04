@@ -30,6 +30,7 @@ import { DEMO_TICKETS, seedTickets } from '../../../../server/db/seeds/tickets';
 import { PERMISSIONS, ROLES } from '../../../../server/permissions/codes';
 import { resetPassword } from '../../../../server/users/account-service';
 import { clock } from '../../../../server/time/clock';
+import { verifyCaptchaOrThrow } from '../../../../server/security/captcha';
 import * as changeInitialPasswordRoute from '../../auth/change-initial-password/route';
 import * as loginRoute from '../../auth/login/route';
 import * as meRoute from '../../auth/me/route';
@@ -39,6 +40,11 @@ import * as blockRoute from './[id]/block/route';
 import * as resetPasswordRoute from './[id]/reset-password/route';
 import * as unblockRoute from './[id]/unblock/route';
 import * as usersRoute from './route';
+
+vi.mock('../../../../server/security/captcha', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../server/security/captcha')>();
+  return { ...actual, verifyCaptchaOrThrow: vi.fn(() => Promise.resolve()) };
+});
 
 // The administrator's user API end to end: real route handlers, real sessions and cookies, a real
 // (in-memory) database. Who may call what, and what a response may contain, is the point of this
@@ -55,6 +61,7 @@ beforeEach(() => {
   fakeClock.install();
   ids = seedWorld(db);
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
+  vi.mocked(verifyCaptchaOrThrow).mockResolvedValue();
 });
 
 afterEach(() => {

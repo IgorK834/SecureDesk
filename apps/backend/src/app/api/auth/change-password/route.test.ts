@@ -23,6 +23,7 @@ import {
   users,
 } from '../../../../server/db/schema';
 import { csrfTokenForSession } from '../../../../server/security/csrf';
+import { verifyCaptchaOrThrow } from '../../../../server/security/captcha';
 import { POST as login } from '../login/route';
 import { GET as me } from '../me/route';
 import { POST, dynamic, runtime } from './route';
@@ -40,6 +41,10 @@ vi.mock('../../../../server/auth/password-hasher', async (importOriginal) => {
 vi.mock('../../../../server/auth/session-service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../../server/auth/session-service')>();
   return { ...actual, createSession: vi.fn(actual.createSession) };
+});
+vi.mock('../../../../server/security/captcha', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../server/security/captcha')>();
+  return { ...actual, verifyCaptchaOrThrow: vi.fn(() => Promise.resolve()) };
 });
 
 const MINUTE_MS = 60 * 1000;
@@ -75,6 +80,7 @@ beforeEach(() => {
   });
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
   vi.mocked(hashPassword).mockClear();
+  vi.mocked(verifyCaptchaOrThrow).mockResolvedValue();
 });
 
 afterEach(() => {

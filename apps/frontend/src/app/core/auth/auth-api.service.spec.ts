@@ -27,12 +27,20 @@ describe('AuthApiService', () => {
   };
 
   it('POSTs login to the same-origin endpoint', async () => {
-    const body = { login: 'employee', password: 'private value' };
+    const body = {
+      login: 'employee',
+      password: 'private value',
+      captcha: { challengeId: 'challenge-1', answer: 'ZYX321' },
+    };
     await assertPost('/api/auth/login', body, (api) => api.login(body));
   });
 
   it('POSTs initial password changes to the same-origin endpoint', async () => {
-    const body = { newPassword: 'new private value', confirmNewPassword: 'new private value' };
+    const body = {
+      newPassword: 'new private value',
+      confirmNewPassword: 'new private value',
+      captcha: { token: 'single-use-proof' },
+    };
     await assertPost('/api/auth/change-initial-password', body, (api) =>
       api.changeInitialPassword(body),
     );
@@ -43,6 +51,7 @@ describe('AuthApiService', () => {
       currentPassword: 'old private value',
       newPassword: 'new private value',
       confirmNewPassword: 'new private value',
+      captcha: { token: 'single-use-proof' },
     };
     await assertPost('/api/auth/change-password', body, (api) => api.changePassword(body));
   });
