@@ -38,6 +38,16 @@ requires every listed identifier to occur in a real `describe`, `it` or `test` t
 | SEC-28 | Strict update schemas reject hidden privileged fields.                         |
 | SEC-29 | Direct mutations of the protected ADMIN account are rejected.                  |
 | SEC-30 | An unexpired server-side session survives reopening the persistent database.   |
+| SEC-40 | Missing login CAPTCHA stops before password verification or account counting.  |
+| SEC-41 | Wrong, expired and reused login challenges count only against the address.     |
+| SEC-42 | Turnstile binds success to action, hostname and the 120-second lifetime.       |
+| SEC-43 | Turnstile outage returns 503 before any credential verification.               |
+| SEC-44 | Password CAPTCHA refusal leaves the hash and history byte-identical.           |
+| SEC-45 | A successful password-change token cannot be replayed.                         |
+| SEC-46 | An internal challenge is consumed by the first answer, right or wrong.         |
+| SEC-47 | The internal challenge passes at 119 seconds and fails at 121 seconds.         |
+| SEC-48 | Original-order text fails while its reversed form succeeds.                    |
+| SEC-62 | Production startup rejects dummy keys and every test-only CAPTCHA bypass.      |
 
 API tests invoke the exported Next.js route handlers with real `Request` objects and the cookie
 jar in `tests/helpers/api-client.ts`; no Angular code is involved. Database fixtures create an
@@ -94,6 +104,29 @@ not race over shared settings and a flaky first attempt cannot be hidden.
 
 Run the complete suite with `npx playwright test`. A clean run recreates every evidence image. Three
 consecutive full runs with retries disabled are the release check for determinism.
+
+## Manual Turnstile check
+
+The automated suite replaces Cloudflare's siteverify endpoint with a local fetch stub. The manual
+upstream check was last run on **2026-11-03**, using only Cloudflare's published dummy token and
+test secrets: the always-pass secret returned `success: true`; the duplicate-response secret
+returned `success: false` with `timeout-or-duplicate`. Only those allowlisted fields were printed.
+No real key, request body, token or full provider response was logged. The direct dummy token is
+not created by a rendered widget and therefore carries no form action; the hermetic adapter suite
+separately proves the required action, hostname and maximum-age binding. See Cloudflare's
+[Turnstile testing reference](https://developers.cloudflare.com/turnstile/troubleshooting/testing/).
+
+For a full browser check, put the published test site/secret pair in a local untracked `.env`, open
+a password-change form and submit the widget-generated token. Production startup refuses all
+published `1x`, `2x`, and `3x` dummy key families and the `TURNSTILE_VERIFY_URL` test override.
+
+The reCAPTCHA suite uses a local `siteverify` stub and the same provider-contract cases as
+Turnstile: action, hostname, age and timeout. Route integration tests switch
+`CAPTCHA_PASSWORD_CHANGE_PROVIDER=recaptcha` and prove both a successful password change and a
+timeout that returns 503 before credential verification. Circuit-breaker tests use a fake clock to
+open the optional internal fallback after five unavailable results, restore Turnstile after five
+minutes, and assert one provider-error event per outage; another route test completes a password
+change with the internal proof shape while that circuit is open.
 
 ## Coverage and isolation
 
