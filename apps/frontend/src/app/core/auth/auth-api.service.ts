@@ -3,10 +3,12 @@ import { Injectable, inject } from '@angular/core';
 import type { Observable } from 'rxjs';
 import type { LoginResponse, PasswordChangeResponse } from './auth.models';
 
+export type CaptchaProof = { token: string } | { challengeId: string; answer: string };
+
 export interface LoginRequest {
   login: string;
   password: string;
-  captcha?: { token: string } | { challengeId: string; answer: string };
+  captcha: CaptchaProof;
   website?: string;
   formToken?: string;
 }
@@ -14,6 +16,7 @@ export interface LoginRequest {
 export interface ChangeInitialPasswordRequest {
   newPassword: string;
   confirmNewPassword: string;
+  captcha: CaptchaProof;
 }
 
 export interface ChangePasswordRequest extends ChangeInitialPasswordRequest {
