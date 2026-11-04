@@ -18,6 +18,7 @@ export interface E2eCredentials {
 }
 
 export const EVIDENCE_DIR = path.resolve('docs/report-evidence');
+let loginAddressSuffix = 10;
 
 export function credentials(): E2eCredentials {
   return JSON.parse(readFileSync(E2E_CREDENTIALS_PATH, 'utf8')) as E2eCredentials;
@@ -27,8 +28,34 @@ export function freshPassword(): string {
   return `Fresh-${randomBytes(18).toString('base64url')}!7`;
 }
 
+async function installTurnstileStub(page: Page): Promise<void> {
+  await page.route(
+    'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit',
+    (route) =>
+      route.fulfill({
+        contentType: 'application/javascript',
+        body: `(() => {
+        let options;
+        window.turnstile = {
+          render: (_container, value) => {
+            options = value;
+            setTimeout(() => value.callback('e2e-turnstile-token'), 0);
+            return 'e2e-widget';
+          },
+          reset: () => setTimeout(() => options.callback('e2e-turnstile-token'), 0),
+          remove: () => {}
+        };
+      })();`,
+      }),
+  );
+}
+
 export async function submitLogin(page: Page, credential: E2eCredential): Promise<void> {
+  await installTurnstileStub(page);
+  loginAddressSuffix += 1;
+  await page.setExtraHTTPHeaders({ 'X-Forwarded-For': `198.51.100.${loginAddressSuffix}` });
   await page.goto('/login');
+  await page.getByLabel('Reversed characters').fill('TEST-SOLVED');
   await page.getByLabel('Login').fill(credential.login);
   await page.getByLabel('Password').fill(credential.password);
   await page.getByRole('button', { name: 'Sign in' }).click();

@@ -10,7 +10,17 @@ const commonEnv = {
   CSRF_SECRET: 'e2e-only-csrf-secret-with-at-least-32-bytes',
   TOTP_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString('base64'),
   COOKIE_SECURE: 'false',
-  TRUST_PROXY: 'false',
+  // The Angular dev proxy appends its loopback hop to the synthetic browser address.
+  TRUST_PROXY: 'true',
+  TRUSTED_PROXY_HOPS: '2',
+  CAPTCHA_LOGIN_PROVIDER: 'internal',
+  CAPTCHA_PASSWORD_CHANGE_PROVIDER: 'turnstile',
+  CAPTCHA_HMAC_SECRET: 'e2e-only-internal-captcha-hmac-secret',
+  CAPTCHA_TEST_MODE: 'true',
+  TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
+  TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
+  CAPTCHA_EXPECTED_HOSTNAME: 'localhost',
+  TURNSTILE_VERIFY_URL: 'http://127.0.0.1:3100/siteverify',
 };
 
 export default defineConfig({
@@ -32,6 +42,13 @@ export default defineConfig({
     viewport: { width: 1440, height: 900 },
   },
   webServer: [
+    {
+      command: 'node --experimental-strip-types tests/e2e/turnstile-stub.ts',
+      cwd: root,
+      url: 'http://127.0.0.1:3100/health',
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
     {
       command: 'npm run dev -w apps/backend',
       cwd: root,
