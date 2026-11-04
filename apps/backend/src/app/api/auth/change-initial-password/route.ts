@@ -4,8 +4,11 @@ import { sessionCookie } from '../../../../server/auth/cookie';
 import { changeInitialPassword } from '../../../../server/auth/password-service';
 import { db } from '../../../../server/db/client';
 import { defineRoute } from '../../../../server/http/route-handler';
+import { verifyCaptchaOrThrow } from '../../../../server/security/captcha';
 import { csrfCookie } from '../../../../server/security/csrf';
 import { logEvent } from '../../../../server/security/log-event';
+import { getClientIp } from '../../../../server/security/rate-limiter';
+import { clock } from '../../../../server/time/clock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,6 +20,17 @@ const ChangeInitialPasswordBody = z
   .object({
     newPassword: z.string().max(1024),
     confirmNewPassword: z.string().max(1024),
+    captcha: z
+      .union([
+        z.object({ token: z.string().min(1).max(2048) }).strict(),
+        z
+          .object({
+            challengeId: z.string().min(1).max(128),
+            answer: z.string().min(1).max(128),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict();
 
@@ -33,7 +47,15 @@ export const POST = defineRoute({
   name: 'auth.change_initial_password',
   auth: { stages: ['INITIAL_PASSWORD_CHANGE'] },
   body: ChangeInitialPasswordBody,
-  handler: async ({ requestId, session, body }) => {
+  handler: async ({ request, requestId, session, body }) => {
+    await verifyCaptchaOrThrow(body.captcha, {
+      db,
+      purpose: 'change-password',
+      ipKey: getClientIp(request),
+      now: clock.now(),
+      requestId,
+      userAgent: request.headers.get('user-agent'),
+    });
     const result = await changeInitialPassword(db, session.session, body);
 
     logEvent('auth.change_initial_password.success', requestId);
