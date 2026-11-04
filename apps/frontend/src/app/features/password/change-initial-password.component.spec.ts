@@ -3,7 +3,7 @@ import '../../__fixtures__/test-environment';
 import { HttpErrorResponse } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
 import { meResponse } from '../../__fixtures__/session';
 import { AuthApiService } from '../../core/auth/auth-api.service';
@@ -14,6 +14,7 @@ import type {
 } from '../../core/auth/auth.models';
 import { AuthService } from '../../core/auth/auth.service';
 import { ApiClient } from '../../core/http/api-client.service';
+import { CaptchaApiService } from '../../shared/ui/captcha/captcha-api.service';
 import { ChangeInitialPasswordComponent } from './change-initial-password.component';
 
 const me = meResponse('EMPLOYEE', 'INITIAL_PASSWORD_CHANGE');
@@ -33,6 +34,7 @@ function setup(
   answer: Observable<PasswordChangeResponse> = of(success),
   policy: PasswordPolicy | null = me.passwordPolicy,
   meAnswer: Observable<MeResponse> = of(me),
+  captchaSolved = true,
 ) {
   const api = { changeInitialPassword: vi.fn(() => answer) };
   const meCall = vi.fn(() => meAnswer);
@@ -51,12 +53,20 @@ function setup(
     providers: [
       { provide: AuthApiService, useValue: api },
       { provide: ApiClient, useValue: { me: meCall } },
+      { provide: CaptchaApiService, useValue: { config: () => NEVER } },
       { provide: AuthService, useValue: auth },
       { provide: Router, useValue: router },
     ],
   });
   const fixture = TestBed.createComponent(ChangeInitialPasswordComponent);
   fixture.detectChanges();
+  if (captchaSolved) {
+    const component = fixture.componentInstance as unknown as {
+      captchaProof: { set(value: { token: string }): void };
+    };
+    component.captchaProof.set({ token: 'single-use-proof' });
+    fixture.detectChanges();
+  }
   const root = fixture.nativeElement as HTMLElement;
   const input = (id: string, value: string) => {
     const element = root.querySelector(`#${id}`) as HTMLInputElement;
@@ -90,6 +100,45 @@ describe('ChangeInitialPasswordComponent', () => {
     expect(root.textContent).toContain('Passwords do not match.');
     button.click();
     expect(api.changeInitialPassword).not.toHaveBeenCalled();
+  });
+
+  it('requires a proof, sends it once, and disables submit again after the attempt', () => {
+    const page = setup(of(success), me.passwordPolicy, of(me), false);
+    page.fill();
+    const button = page.root.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(page.api.changeInitialPassword).not.toHaveBeenCalled();
+
+    const component = page.fixture.componentInstance as unknown as {
+      captchaProof: { set(value: { token: string }): void };
+    };
+    component.captchaProof.set({ token: 'one-use-token' });
+    page.fixture.detectChanges();
+    button.click();
+    page.fixture.detectChanges();
+
+    expect(page.api.changeInitialPassword).toHaveBeenCalledWith(
+      expect.objectContaining({ captcha: { token: 'one-use-token' } }),
+    );
+    expect(button.disabled).toBe(true);
+  });
+
+  it('disables submit again when the CAPTCHA expires before submission', () => {
+    const page = setup();
+    page.fill();
+    const button = page.root.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+
+    (
+      page.fixture.componentInstance as unknown as {
+        captchaProof: { set(value: null): void };
+      }
+    ).captchaProof.set(null);
+    page.fixture.detectChanges();
+
+    expect(button.disabled).toBe(true);
+    button.click();
+    expect(page.api.changeInitialPassword).not.toHaveBeenCalled();
   });
 
   it('renders every allowlisted backend policy violation without profile values', () => {
