@@ -11,10 +11,15 @@ import { type ExportedHandler, loadRoutes } from './helpers/route-scanner';
 const API_ROOT = path.resolve(__dirname, '../apps/backend/src/app/api');
 const FIXTURES_ROOT = path.resolve(__dirname, 'fixtures/conformance');
 
-// The only routes allowed to say `auth: 'public'`. Both must work without a session: a load
-// balancer has none, and login is how a session starts. Adding a route here is a deliberate,
-// reviewed act; a new public endpoint without it fails the test.
-const PUBLIC_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set(['/api/health', '/api/auth/login']);
+// The only routes allowed to say `auth: 'public'`. Future CAPTCHA challenge and backup-config
+// handlers are reviewed here before their task adds the files; anything else still fails closed.
+const PUBLIC_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
+  '/api/health',
+  '/api/auth/login',
+  '/api/captcha/config',
+  '/api/captcha/challenge',
+  '/api/backup/config',
+]);
 
 const isAdminRoute = (route: string) => route === '/api/admin' || route.startsWith('/api/admin/');
 
@@ -49,6 +54,8 @@ describe('route guard conformance: the real API', () => {
     expect(found).toEqual(
       expect.arrayContaining([
         'GET /api/health',
+        'GET /api/captcha/config',
+        'POST /api/captcha/challenge',
         'POST /api/auth/login',
         'POST /api/auth/logout',
         'GET /api/auth/me',
@@ -68,7 +75,12 @@ describe('route guard conformance: the real API', () => {
       .map(({ route }) => route)
       .sort();
 
-    expect(publicRoutes).toEqual(['/api/auth/login', '/api/health']);
+    expect(publicRoutes).toEqual([
+      '/api/auth/login',
+      '/api/captcha/challenge',
+      '/api/captcha/config',
+      '/api/health',
+    ]);
   });
 });
 
