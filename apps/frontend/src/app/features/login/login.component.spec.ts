@@ -3,13 +3,16 @@ import '../../__fixtures__/test-environment';
 import { HttpErrorResponse } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
-import { Observable, Subject, of, throwError } from 'rxjs';
+import { NEVER, Observable, Subject, of, throwError } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
 import { meResponse } from '../../__fixtures__/session';
 import { AuthApiService } from '../../core/auth/auth-api.service';
 import type { AuthStage, LoginResponse } from '../../core/auth/auth.models';
 import { AuthService } from '../../core/auth/auth.service';
+import { CaptchaApiService } from '../../shared/ui/captcha/captcha-api.service';
 import { LoginComponent } from './login.component';
+
+const captcha = { challengeId: 'challenge-1', answer: 'ZYX321' };
 
 const response = (stage: AuthStage = 'FULLY_AUTHENTICATED'): LoginResponse => {
   const me = meResponse('EMPLOYEE', stage);
@@ -39,6 +42,7 @@ function setup(
     providers: [
       { provide: AuthApiService, useValue: api },
       { provide: AuthService, useValue: auth },
+      { provide: CaptchaApiService, useValue: { config: () => NEVER } },
       { provide: Router, useValue: router },
       {
         provide: ActivatedRoute,
@@ -48,11 +52,18 @@ function setup(
   });
   const fixture = TestBed.createComponent(LoginComponent);
   fixture.detectChanges();
+  (
+    fixture.componentInstance as unknown as {
+      captchaProof: { set(value: typeof captcha): void };
+    }
+  ).captchaProof.set(captcha);
+  fixture.detectChanges();
   const root = fixture.nativeElement as HTMLElement;
   const input = (id: string, value: string) => {
     const element = root.querySelector(`#${id}`) as HTMLInputElement;
     element.value = value;
     element.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
   };
   const valid = () => {
     input('login', ' employee1 ');
@@ -83,7 +94,11 @@ describe('LoginComponent', () => {
       ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 
     expect(api.login).toHaveBeenCalledTimes(1);
-    expect(api.login).toHaveBeenCalledWith({ login: 'employee1', password: 'private value' });
+    expect(api.login).toHaveBeenCalledWith({
+      login: 'employee1',
+      password: 'private value',
+      captcha,
+    });
   });
 
   it.each(['wrong password', 'unknown login'])(
@@ -122,7 +137,7 @@ describe('LoginComponent', () => {
   it('counts an account lock down from server seconds using monotonic elapsed time', () => {
     vi.useFakeTimers();
     try {
-      const { api, fixture, root, valid } = setup(
+      const { api, fixture, input, root, valid } = setup(
         throwError(() =>
           failure(429, 'AUTH_ACCOUNT_LOCKED', {
             retryAfterSeconds: 872,
@@ -150,8 +165,17 @@ describe('LoginComponent', () => {
       vi.advanceTimersByTime(871_000);
       fixture.detectChanges();
       expect(visible()).toContain('00:00');
-      expect(button.disabled).toBe(false);
+      expect(button.disabled).toBe(true);
       expect(root.querySelector('.visually-hidden')?.textContent).toBe('You can try again now');
+
+      (
+        fixture.componentInstance as unknown as {
+          captchaProof: { set(value: typeof captcha): void };
+        }
+      ).captchaProof.set(captcha);
+      input('password', 'private value');
+      fixture.detectChanges();
+      expect(button.disabled).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -215,12 +239,43 @@ describe('LoginComponent', () => {
     );
   });
 
+  it.each([
+    ['CAPTCHA_REQUIRED', 400, 'Type the characters in reverse order'],
+    ['CAPTCHA_FAILED', 403, 'Verification failed, try again'],
+    ['CAPTCHA_UNAVAILABLE', 503, 'Verification is temporarily unavailable'],
+  ] as const)('maps %s and requires a fresh proof after the attempt', (code, status, message) => {
+    const { fixture, root, valid } = setup(throwError(() => failure(status, code)));
+    valid();
+
+    (root.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain(message);
+    expect((root.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('never submits while the CAPTCHA proof is missing', () => {
+    const { api, fixture, root, valid } = setup();
+    (
+      fixture.componentInstance as unknown as {
+        captchaProof: { set(value: null): void };
+      }
+    ).captchaProof.set(null);
+    valid();
+
+    const button = root.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    button.click();
+    expect(api.login).not.toHaveBeenCalled();
+  });
+
   it('reports a login over the 64-character limit without sending it', () => {
     const { api, fixture, input, root } = setup();
     input('login', 'x'.repeat(65));
     input('password', 'private value');
-
-    (root.querySelector('button[type="submit"]') as HTMLButtonElement).click();
+    root
+      .querySelector('#login')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     fixture.detectChanges();
 
     expect(root.textContent).toContain('Use at most 64 characters.');

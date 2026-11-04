@@ -21,6 +21,8 @@
       }
     </div>
 
+    <app-captcha purpose="login" (tokenChange)="captchaProof.set($event)" />
+
     <div class="field">
       <label for="password">Password</label>
       <input
@@ -48,7 +50,10 @@
       }
     </div>
 
-    <button type="submit" [disabled]="submitting() || countdownActive()">
+    <button
+      type="submit"
+      [disabled]="submitting() || countdownActive() || form.invalid || !captchaProof()"
+    >
       @if (submitting()) {
         <span class="spinner" aria-hidden="true"></span>
         Signing in…

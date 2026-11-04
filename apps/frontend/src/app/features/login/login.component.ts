@@ -1,9 +1,11 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthApiService } from '../../core/auth/auth-api.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { apiErrorDetails, describeApiError } from '../../core/http/api-error';
+import { CaptchaComponent } from '../../shared/ui/captcha/captcha.component';
+import type { CaptchaProof } from '../../shared/ui/captcha/captcha-api.service';
 
 const INVALID_CREDENTIALS = 'Login lub hasło niepoprawne';
 const TOO_MANY_ATTEMPTS = 'Too many attempts, try again later';
@@ -21,11 +23,14 @@ function acceptedReturnUrl(value: string | null): string | null {
 /** Public sign-in page. Credentials exist only in this form and the one request body. */
 @Component({
   selector: 'app-login',
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, CaptchaComponent],
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss',
 })
 export class LoginComponent {
+  @ViewChild(CaptchaComponent)
+  private captchaWidget?: CaptchaComponent;
+
   private readonly api = inject(AuthApiService);
   private readonly auth = inject(AuthService);
   private readonly route = inject(ActivatedRoute);
@@ -42,6 +47,7 @@ export class LoginComponent {
   readonly submitting = signal(false);
   protected readonly submitted = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly captchaProof = signal<CaptchaProof | null>(null);
   protected readonly countdownSeconds = signal<number | null>(null);
   private readonly blockKind = signal<BlockKind | null>(null);
   protected readonly countdownAnnouncement = signal<string | null>(null);
@@ -62,14 +68,16 @@ export class LoginComponent {
 
   protected submit(): void {
     this.submitted.set(true);
-    if (this.submitting() || this.countdownActive() || this.form.invalid) return;
+    const captcha = this.captchaProof();
+    if (this.submitting() || this.countdownActive() || this.form.invalid || !captcha) return;
 
     this.submitting.set(true);
     this.errorMessage.set(null);
     this.stopCountdown();
     const { login, password } = this.form.getRawValue();
-    this.api.login({ login: login.trim(), password }).subscribe({
+    this.api.login({ login: login.trim(), password, captcha }).subscribe({
       next: (response) => {
+        this.resetCaptcha();
         this.auth.setSession(response);
         const destination =
           response.authStage === 'INITIAL_PASSWORD_CHANGE'
@@ -91,6 +99,7 @@ export class LoginComponent {
       },
       error: (error: unknown) => {
         const { status, code } = describeApiError(error);
+        this.resetCaptcha(code === 'CAPTCHA_UNAVAILABLE');
         const { retryAfterSeconds } = apiErrorDetails(error);
         this.form.controls.password.reset();
         this.submitting.set(false);
@@ -102,15 +111,28 @@ export class LoginComponent {
           this.startCountdown(code === 'AUTH_ACCOUNT_LOCKED' ? 'account' : 'ip', retryAfterSeconds);
           return;
         }
-        this.errorMessage.set(
-          status === 401
-            ? INVALID_CREDENTIALS
-            : status === 429
-              ? TOO_MANY_ATTEMPTS
-              : 'Sign in is unavailable. Try again later.',
-        );
+        if (code === 'CAPTCHA_REQUIRED') {
+          this.errorMessage.set('Type the characters in reverse order');
+        } else if (code === 'CAPTCHA_FAILED') {
+          this.errorMessage.set('Verification failed, try again');
+        } else if (code === 'CAPTCHA_UNAVAILABLE') {
+          this.errorMessage.set('Verification is temporarily unavailable');
+        } else {
+          this.errorMessage.set(
+            status === 401
+              ? INVALID_CREDENTIALS
+              : status === 429
+                ? TOO_MANY_ATTEMPTS
+                : 'Sign in is unavailable. Try again later.',
+          );
+        }
       },
     });
+  }
+
+  private resetCaptcha(reselectProvider = false): void {
+    this.captchaWidget?.reset(reselectProvider);
+    this.captchaProof.set(null);
   }
 
   private startCountdown(kind: BlockKind, seconds: number): void {
