@@ -9,8 +9,14 @@ import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-tes
 import { insertUser } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
 import { loginAttempts, securityEvents, sessions, users } from '../../../../server/db/schema';
+import { verifyCaptchaOrThrow } from '../../../../server/security/captcha';
 import { seedDatabase } from '../../../../server/db/seeds';
 import { POST, dynamic, runtime } from './route';
+
+vi.mock('../../../../server/security/captcha', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../server/security/captcha')>();
+  return { ...actual, verifyCaptchaOrThrow: vi.fn(() => Promise.resolve()) };
+});
 
 // These tests drive the real route handler against the real database wiring (an in-memory test
 // database), the real Argon2id hashing and the real seeded accounts: what is asserted is what a
@@ -37,6 +43,7 @@ beforeEach(() => {
   fakeClock.install();
   // The route logs one line per request; tests that inspect the log capture it themselves.
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
+  vi.mocked(verifyCaptchaOrThrow).mockResolvedValue();
 });
 
 afterEach(() => {

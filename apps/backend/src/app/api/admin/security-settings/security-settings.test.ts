@@ -18,7 +18,13 @@ import * as changePasswordRoute from '../../auth/change-password/route';
 import * as loginRoute from '../../auth/login/route';
 import * as meRoute from '../../auth/me/route';
 import { readSecuritySettings } from '../../../../server/security/settings';
+import { verifyCaptchaOrThrow } from '../../../../server/security/captcha';
 import * as settingsRoute from './route';
+
+vi.mock('../../../../server/security/captcha', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../server/security/captcha')>();
+  return { ...actual, verifyCaptchaOrThrow: vi.fn(() => Promise.resolve()) };
+});
 
 // The security settings API end to end: real route handlers, real sessions and cookies, a real
 // (in-memory) database. Two things matter and are tested separately: who may read and change the
@@ -39,6 +45,7 @@ beforeEach(() => {
   ids = seedWorld(db);
   db.transaction((tx) => seedSecuritySettings(tx)); // as `npm run db:seed` leaves the database
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
+  vi.mocked(verifyCaptchaOrThrow).mockResolvedValue();
 });
 
 afterEach(() => {

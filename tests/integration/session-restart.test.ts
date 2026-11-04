@@ -1,9 +1,15 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashPassword } from '../../apps/backend/src/server/auth/password-hasher';
 import { insertUser } from '../../apps/backend/src/server/db/__fixtures__/test-db';
 import * as loginRoute from '../../apps/backend/src/app/api/auth/login/route';
 import * as meRoute from '../../apps/backend/src/app/api/auth/me/route';
 import { createTestApp } from '../helpers/app';
+
+vi.mock('../../apps/backend/src/server/security/captcha', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../apps/backend/src/server/security/captcha')>();
+  return { ...actual, verifyCaptchaOrThrow: vi.fn(() => Promise.resolve()) };
+});
 
 const PASSWORD = 'integration-generated-password-731';
 let passwordHash: string;
