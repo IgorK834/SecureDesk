@@ -14,7 +14,7 @@ loadEnvConfig(
 const nextConfig: NextConfig = {
   agentRules: false,
   // Native modules must be required at runtime, not bundled.
-  serverExternalPackages: ['better-sqlite3', 'argon2'],
+  serverExternalPackages: ['better-sqlite3', 'argon2', 'opentype.js'],
   async headers() {
     return [
       {
