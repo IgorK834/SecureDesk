@@ -1,6 +1,7 @@
 import type { AppDb } from '../db/connection';
 import { AccountLockedError, type ApiError, IpBlockedError } from '../http/errors';
 import { checkIpBlock, reserveCredentialAttempt } from '../security/attempt-tracker';
+import { verifyCaptchaOrThrow } from '../security/captcha';
 
 export interface LoginAttemptContext {
   ip: string;
@@ -8,6 +9,7 @@ export interface LoginAttemptContext {
   userAgent: string | null;
   requestId: string;
   now: Date;
+  captcha?: unknown;
 }
 
 export const LOGIN_GUARD_STAGE_ORDER = [
@@ -62,7 +64,20 @@ export const LOGIN_GUARD_STAGES: readonly LoginGuardStage[] = [
       return { status: 'refused', error: new IpBlockedError(retryAfterSeconds) };
     },
   },
-  { name: 'captcha', run: continueLogin },
+  {
+    name: 'captcha',
+    run: async (context, { db }) => {
+      await verifyCaptchaOrThrow(context.captcha, {
+        db,
+        purpose: 'login',
+        ipKey: context.ip,
+        now: context.now,
+        requestId: context.requestId,
+        userAgent: context.userAgent,
+      });
+      return continueLogin();
+    },
+  },
   { name: 'honeytoken', run: continueLogin },
   {
     name: 'accountLock',
