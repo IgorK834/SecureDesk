@@ -111,7 +111,7 @@ no `password_changed_at`, it counts as expired.
 | 415    | `UNSUPPORTED_MEDIA_TYPE`   | The media type is not `application/json`                           |
 | 429    | `AUTH_ACCOUNT_LOCKED`      | Login threshold crossed; numeric/ISO details and `Retry-After`     |
 | 429    | `AUTH_IP_BLOCKED`          | Address window exhausted; numeric details and `Retry-After`        |
-| 400    | `CAPTCHA_REQUIRED`         | CAPTCHA proof is absent (when that stage is implemented)           |
+| 400    | `CAPTCHA_REQUIRED`         | CAPTCHA proof is absent                                            |
 | 403    | `CAPTCHA_FAILED`           | CAPTCHA proof is invalid, expired or replayed                      |
 | 503    | `CAPTCHA_UNAVAILABLE`      | CAPTCHA provider cannot verify; authentication fails closed        |
 | 500    | `INTERNAL_ERROR`           | Anything unexpected; nothing about the cause is returned or logged |
@@ -123,8 +123,24 @@ tokens and error messages (which can embed query parameters) are never logged.
 ### Login defence pipeline and lockout contract
 
 The order is fixed and stops at the first refusal: **honeypot → IP block → CAPTCHA → honeytoken →
-account lock → credential verification**. The unimplemented honeypot, CAPTCHA and honeytoken
-stages are explicit pass-through stages rather than hidden hooks.
+account lock → credential verification**. The CAPTCHA stage resolves its provider on the server;
+login uses the internal reverse-string provider by default, while both password-change routes use
+Turnstile. Switching `CAPTCHA_LOGIN_PROVIDER` changes no login-service code. CAPTCHA verification
+runs before account lookup, account-lock reservation, password verification or password-policy
+work; honeypot and honeytoken remain explicit pipeline stages rather than hidden hooks.
+
+The internal provider generates six unambiguous random characters, asks the user to type them in
+reverse order, and stores only an HMAC-SHA256 of the expected answer bound to the challenge id.
+Glyphs are rendered as paths from the bundled OFL-licensed Atkinson Hyperlegible font; neither the
+SVG nor the database contains the source text. An atomic update consumes a challenge before the
+answer comparison, so a right or wrong first answer burns it. Challenges expire after 120 seconds,
+are bound to the form purpose and address, and expired rows are purged as new challenges are
+issued. This coursework mechanism is weak against OCR and is not suitable as the sole production
+bot defence.
+
+An image CAPTCHA also needs an alternative modality for users who cannot perceive the image. This
+implementation does not pretend that an `alt` string containing the answer is accessible; a
+deployment must offer an accessible provider such as Turnstile as the alternative path.
 
 The IP stage derives its block from append-only `login_attempts`, before CAPTCHA work. It counts
 `PENDING` and `FAILED` rows of every kind for one `ip_key` in the 15-minute window, but only after
@@ -702,7 +718,40 @@ headers, so a foreign-origin preflight is never granted.
 
 The separately served SPA should use a nonce- or hash-based policy tailored to its production
 assets, starting from `default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors
-'none'`, then adding only the exact script, style, font and connection sources it needs. Do not add
-`unsafe-eval`; avoid `unsafe-inline` by using nonces or hashes. At the HTTPS reverse proxy, send
+'none'`. For the standard Turnstile widget it must add
+`script-src 'self' https://challenges.cloudflare.com` and
+`frame-src https://challenges.cloudflare.com`; `connect-src` does not need a Cloudflare origin.
+For reCAPTCHA v3 it must instead add `https://www.google.com/recaptcha/` and
+`https://www.gstatic.com/recaptcha/` to `script-src`, add
+`https://www.google.com/recaptcha/` and `https://recaptcha.google.com/recaptcha/` to `frame-src`,
+and add `https://www.google.com/recaptcha/` to `connect-src` (Google's
+[CSP guidance](https://developers.google.com/recaptcha/docs/faq#im_using_content-security-policy_csp_on_my_website_how_can_i_configure_it_to_work_with_recaptcha)).
+The API's own `default-src 'none'` policy above stays unchanged. Do not add `unsafe-eval`; avoid
+`unsafe-inline` by using nonces or hashes. At the HTTPS reverse proxy, send
 `Strict-Transport-Security: max-age=31536000; includeSubDomains` only after every covered subdomain
 is permanently HTTPS; add `preload` only after satisfying the browser preload requirements.
+
+## CAPTCHA provider selection and outage fallback
+
+Every form asks the public config endpoint for the provider selected by the server and submits the
+same provider-neutral `captcha` field. Login defaults to the local reversed-string challenge;
+password changes default to Turnstile and can select reCAPTCHA v3 without changing form code. The
+reCAPTCHA adapter uses Google's classic `siteverify` endpoint, which remains available for
+Cloud-migrated keys according to Google's
+[migration guide](https://docs.cloud.google.com/recaptcha/docs/migrate-recaptcha), and additionally
+binds the result to action, hostname, age and a configurable minimum score. This adapter's explicit
+site-key-plus-secret configuration selects that classic/migrated flow; a native Enterprise-only key
+would instead require the assessment API and is not accepted as a silent substitute. The adapter
+maps the internal `change-password` purpose to the Google-compatible
+`change_password` action; that translation is returned by the config endpoint and never leaks into
+form code. It rejects responses that contain provider error codes even if they also report success,
+preserving the application's fail-closed rule.
+
+Turnstile remains strictly fail-closed unless `CAPTCHA_FALLBACK=internal` is explicitly set. With
+that flag, five consecutive `UNAVAILABLE` results open a process-local circuit for five minutes.
+During that bounded interval the config and challenge endpoints expose the internal provider for
+password-change forms; the client re-reads config after a provider-unavailable submission. One
+`CAPTCHA_PROVIDER_ERROR` event is recorded for the outage. A success, a non-availability failure,
+or the cool-down expiry resets the consecutive-failure state. Because this simple breaker is
+process-local, a multi-instance deployment needs shared breaker state if every instance must switch
+at exactly the same time.
