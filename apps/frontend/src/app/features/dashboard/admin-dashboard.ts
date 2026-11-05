@@ -16,6 +16,10 @@ import { RouterLink } from '@angular/router';
         <strong>Security settings</strong>
         <span>Configure password rules, expiry and session inactivity.</span>
       </a>
+      <a routerLink="/admin/security-events">
+        <strong>Security events</strong>
+        <span>Review alerts, acknowledge incidents and test honeytokens.</span>
+      </a>
     </div>
   `,
   styles: `
