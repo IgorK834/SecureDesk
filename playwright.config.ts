@@ -21,6 +21,7 @@ const commonEnv = {
   TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
   CAPTCHA_EXPECTED_HOSTNAME: 'localhost',
   TURNSTILE_VERIFY_URL: 'http://127.0.0.1:3100/siteverify',
+  CANARY_ALERTS_ENABLED: 'false',
 };
 
 export default defineConfig({

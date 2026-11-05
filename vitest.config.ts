@@ -58,7 +58,11 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      include: ['apps/backend/src/**/*.ts', 'apps/frontend/src/app/**/*.ts'],
+      include: [
+        'apps/backend/src/**/*.ts',
+        'apps/frontend/src/app/**/*.ts',
+        'scripts/bot-sim/{guards,request-budget,report,runner}.ts',
+      ],
       exclude: [
         '**/*.{test,spec}.ts',
         '**/__fixtures__/**',

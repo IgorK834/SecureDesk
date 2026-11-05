@@ -16,10 +16,13 @@
     "typecheck": "npm run typecheck --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "npm run check:sec-traceability && npm run check:image-locations && vitest run --coverage",
+    "test": "npm run check:sec-traceability && npm run check:image-locations && npm run check:canary-urls && npm run check:aws-key-patterns && vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:e2e:module2": "playwright test tests/e2e/lockout.spec.ts tests/e2e/captcha-login.spec.ts tests/e2e/captcha-password-change.spec.ts tests/e2e/honeypot.spec.ts tests/e2e/honeytoken.spec.ts tests/e2e/bot-sim.spec.ts tests/e2e/security-events.spec.ts",
     "check:sec-traceability": "node --experimental-strip-types scripts/check-sec-traceability.ts",
     "check:image-locations": "node --experimental-strip-types scripts/check-image-locations.ts",
+    "check:canary-urls": "node --experimental-strip-types scripts/check-canary-urls.ts",
+    "check:aws-key-patterns": "node --experimental-strip-types scripts/check-aws-key-patterns.ts",
     "db:generate": "npm run db:generate -w apps/backend",
     "db:migrate": "npm run db:migrate -w apps/backend",
     "db:migrate:test": "npm run db:migrate:test -w apps/backend",
@@ -28,7 +31,8 @@
     "db:seed": "npm run db:seed -w apps/backend",
     "db:seed:test": "npm run db:seed:test -w apps/backend",
     "maintenance:purge": "npm run maintenance:purge -w apps/backend",
-    "admin:unlock": "npm run admin:unlock -w apps/backend --"
+    "admin:unlock": "npm run admin:unlock -w apps/backend --",
+    "bot-sim": "node --experimental-strip-types scripts/bot-sim/bot-sim.ts"
   },
   "overrides": {
     "@angular/build": {
