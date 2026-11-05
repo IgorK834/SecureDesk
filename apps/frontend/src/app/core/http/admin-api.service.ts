@@ -31,6 +31,50 @@ export interface IpBlock {
   lockedUntil: string;
 }
 
+export type SecurityEventSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
+export type SecurityEventAcknowledged = boolean;
+
+export interface SecurityEventQuery {
+  type?: string;
+  severity?: SecurityEventSeverity;
+  acknowledged?: SecurityEventAcknowledged;
+  from?: string;
+  to?: string;
+  page: number;
+  pageSize: number;
+}
+
+export interface SecurityEvent {
+  id: string;
+  type: string;
+  severity: SecurityEventSeverity;
+  occurredAt: string;
+  ipKey: string | null;
+  subjectUserId: string | null;
+  details: Record<string, unknown>;
+  requestId: string;
+  acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+  alertStatus: 'NONE' | 'PENDING' | 'SENT' | 'FAILED' | 'SUPPRESSED';
+  alertAttemptedAt: string | null;
+}
+
+export interface SecurityEventPage {
+  items: SecurityEvent[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface HoneytokenStatus {
+  id: string;
+  kind: 'ACCOUNT_TRAP' | 'AWS_KEYS';
+  label: string;
+  enabled: boolean;
+  lastTriggeredAt: string | null;
+  triggerCount: number;
+}
+
 export interface AdminUserQuery {
   q?: string | undefined;
   role?: Role | undefined;
@@ -92,6 +136,8 @@ export interface SecuritySettings {
 const USERS_URL = '/api/admin/users';
 const SECURITY_SETTINGS_URL = '/api/admin/security-settings';
 const IP_BLOCKS_URL = '/api/admin/ip-blocks';
+const SECURITY_EVENTS_URL = '/api/admin/security-events';
+const HONEYTOKENS_URL = '/api/admin/honeytokens';
 const userUrl = (id: string) => `${USERS_URL}/${encodeURIComponent(id)}`;
 
 /**
@@ -164,5 +210,35 @@ export class AdminApi {
 
   clearIpBlock(ipKey: string): Observable<void> {
     return this.http.delete<void>(`${IP_BLOCKS_URL}/${encodeURIComponent(ipKey)}`);
+  }
+
+  listSecurityEvents(query: SecurityEventQuery): Observable<SecurityEventPage> {
+    let params = new HttpParams().set('page', query.page).set('pageSize', query.pageSize);
+    if (query.type) params = params.set('type', query.type);
+    if (query.severity) params = params.set('severity', query.severity);
+    if (query.acknowledged !== undefined) {
+      params = params.set('acknowledged', String(query.acknowledged));
+    }
+    if (query.from) params = params.set('from', query.from);
+    if (query.to) params = params.set('to', query.to);
+    return this.http.get<SecurityEventPage>(SECURITY_EVENTS_URL, { params });
+  }
+
+  acknowledgeSecurityEvent(id: string): Observable<SecurityEvent> {
+    return this.http.post<SecurityEvent>(
+      `${SECURITY_EVENTS_URL}/${encodeURIComponent(id)}/acknowledge`,
+      null,
+    );
+  }
+
+  listHoneytokens(): Observable<{ items: HoneytokenStatus[] }> {
+    return this.http.get<{ items: HoneytokenStatus[] }>(HONEYTOKENS_URL);
+  }
+
+  testHoneytoken(id: string): Observable<{ eventId: string; test: true }> {
+    return this.http.post<{ eventId: string; test: true }>(
+      `${HONEYTOKENS_URL}/${encodeURIComponent(id)}/test`,
+      null,
+    );
   }
 }
