@@ -113,6 +113,10 @@ describe('the admin routes the matrix covers', () => {
         'PATCH /api/admin/security-settings',
         'GET /api/admin/ip-blocks',
         'DELETE /api/admin/ip-blocks/[ipKey]',
+        'GET /api/admin/security-events',
+        'POST /api/admin/security-events/[id]/acknowledge',
+        'GET /api/admin/honeytokens',
+        'POST /api/admin/honeytokens/[id]/test',
         'POST /api/admin/users/[id]/unlock',
       ].sort(),
     );
