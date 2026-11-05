@@ -1,21 +1,35 @@
+import { eq } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeClock } from '../../../../../../../tests/helpers/fake-clock';
 import { LOGIN_GUARD_STAGES } from '../../../../server/auth/login-guard';
-import { hashPassword } from '../../../../server/auth/password-hasher';
+import { hashPassword, verifyPassword } from '../../../../server/auth/password-hasher';
 import { hashSessionToken } from '../../../../server/auth/session-service';
 import { captureOutput } from '../../../../server/__fixtures__/capture-output';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
 import { insertUser } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
-import { loginAttempts, securityEvents, sessions, users } from '../../../../server/db/schema';
+import {
+  honeytokens,
+  loginAttempts,
+  securityEvents,
+  sessions,
+  users,
+} from '../../../../server/db/schema';
+import { seedHoneytokens } from '../../../../server/db/seeds/honeytokens';
+import { clearAlertDispatchers } from '../../../../server/security/alerts';
 import { verifyCaptchaOrThrow } from '../../../../server/security/captcha';
+import { flushPendingAlerts } from '../../../../server/security/events';
 import { seedDatabase } from '../../../../server/db/seeds';
 import { POST, dynamic, runtime } from './route';
 
 vi.mock('../../../../server/security/captcha', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../../server/security/captcha')>();
   return { ...actual, verifyCaptchaOrThrow: vi.fn(() => Promise.resolve()) };
+});
+vi.mock('../../../../server/auth/password-hasher', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../server/auth/password-hasher')>();
+  return { ...actual, verifyPassword: vi.fn(actual.verifyPassword) };
 });
 
 // These tests drive the real route handler against the real database wiring (an in-memory test
@@ -44,10 +58,16 @@ beforeEach(() => {
   // The route logs one line per request; tests that inspect the log capture it themselves.
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
   vi.mocked(verifyCaptchaOrThrow).mockResolvedValue();
+  vi.mocked(verifyPassword).mockClear();
+  clearAlertDispatchers();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await flushPendingAlerts();
+  clearAlertDispatchers();
   fakeClock.uninstall();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -297,6 +317,103 @@ describe('POST /api/auth/login: failures reveal nothing (SEC-01, SEC-02)', () =>
       expect(db.select().from(users).all()).toHaveLength(1);
     },
   );
+});
+
+describe('POST /api/auth/login: honeypot and account trap', () => {
+  const responseHeaders = (response: Response) => Object.fromEntries(response.headers.entries());
+
+  it('SEC-49 returns the generic 401 after one dummy verification and records only an IP strike', async () => {
+    addUser();
+    const ordinary = await loginAs('employee1', 'wrong password');
+    const ordinaryText = await ordinary.text();
+    const accountAttemptsBefore = db
+      .select()
+      .from(loginAttempts)
+      .all()
+      .filter((attempt) => attempt.loginNormalized === 'employee1').length;
+    vi.mocked(verifyPassword).mockClear();
+    vi.mocked(verifyCaptchaOrThrow).mockClear();
+
+    const trapped = await post({
+      login: 'employee1',
+      password: 'wrong password',
+      website: 'x',
+    });
+    const trappedText = await trapped.text();
+
+    expect(trapped.status).toBe(401);
+    expect(trappedText).toBe(ordinaryText);
+    expect(responseHeaders(trapped)).toStrictEqual(responseHeaders(ordinary));
+    expect(verifyPassword).toHaveBeenCalledOnce();
+    expect(vi.mocked(verifyPassword).mock.calls[0]?.[0]).not.toBe(passwordHash);
+    expect(verifyCaptchaOrThrow).not.toHaveBeenCalled();
+    const attempts = db.select().from(loginAttempts).all();
+    expect(attempts.filter((attempt) => attempt.loginNormalized === 'employee1')).toHaveLength(
+      accountAttemptsBefore,
+    );
+    expect(attempts.filter((attempt) => attempt.kind === 'HONEYPOT')).toMatchObject([
+      { loginNormalized: null, ipKey: 'unknown', outcome: 'FAILED' },
+    ]);
+    expect(db.select().from(securityEvents).all()).toMatchObject([
+      { type: 'HONEYPOT_TRIGGERED', severity: 'WARNING', ipKey: 'unknown' },
+    ]);
+  });
+
+  it('SEC-50 lets an absent or empty website pass to CAPTCHA without a honeypot signal', async () => {
+    addUser();
+
+    expect((await post({ login: 'employee1', password: 'wrong' })).status).toBe(401);
+    expect((await post({ login: 'employee1', password: 'wrong', website: '' })).status).toBe(401);
+
+    expect(verifyCaptchaOrThrow).toHaveBeenCalledTimes(2);
+    expect(
+      db
+        .select()
+        .from(loginAttempts)
+        .all()
+        .map((attempt) => attempt.kind),
+    ).toStrictEqual(['CREDENTIAL', 'CREDENTIAL']);
+    expect(db.select().from(securityEvents).all()).toHaveLength(0);
+  });
+
+  it('SEC-34/SEC-51 makes backup_admin indistinguishable from an unknown login and alerts once', async () => {
+    db.transaction((tx) => seedHoneytokens(tx));
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('CANARY_ALERTS_ENABLED', 'true');
+    vi.stubEnv('CANARY_ACCOUNT_TRAP_URL', 'http://alert-stub.test/web-bug');
+    const fetchStub = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchStub);
+
+    vi.mocked(verifyPassword).mockClear();
+    const trapped = await loginAs('backup_admin', 'anything');
+    expect(verifyPassword).toHaveBeenCalledOnce();
+    vi.mocked(verifyPassword).mockClear();
+    const unknown = await loginAs('random_unknown', 'anything');
+    expect(verifyPassword).toHaveBeenCalledOnce();
+    const trappedText = await trapped.text();
+    const unknownText = await unknown.text();
+    await flushPendingAlerts();
+
+    expect(trapped.status).toBe(401);
+    expect(trappedText).toBe(GENERIC_401);
+    expect(trappedText).toBe(unknownText);
+    expect(responseHeaders(trapped)).toStrictEqual(responseHeaders(unknown));
+    expect(fetchStub).toHaveBeenCalledOnce();
+    expect(db.select().from(securityEvents).all()).toMatchObject([
+      {
+        type: 'HONEYTOKEN_TRIGGERED',
+        severity: 'CRITICAL',
+        honeytokenId: 'account-trap-backup-admin',
+        alertStatus: 'SENT',
+      },
+    ]);
+    expect(
+      db.select().from(honeytokens).where(eq(honeytokens.id, 'account-trap-backup-admin')).get(),
+    ).toMatchObject({ triggerCount: 1, lastTriggeredAt: T0 });
+    expect(db.select().from(users).where(eq(users.loginNormalized, 'backup_admin')).all()).toEqual(
+      [],
+    );
+  });
 });
 
 describe('POST /api/auth/login: malformed requests', () => {

@@ -17,6 +17,7 @@ export interface LoginInput {
   /** Exactly as typed: never trimmed or normalized. */
   password: string;
   captcha?: unknown;
+  website?: string;
 }
 
 export interface LoginContext {
@@ -80,6 +81,8 @@ export async function authenticate(input: LoginInput, ctx: LoginContext): Promis
       requestId: ctx.requestId,
       now: clock.now(),
       captcha: input.captcha,
+      password: input.password,
+      website: input.website,
     },
     {
       db: ctx.db,

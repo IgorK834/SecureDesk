@@ -1,7 +1,16 @@
 import type { AppDb } from '../db/connection';
-import { AccountLockedError, type ApiError, IpBlockedError } from '../http/errors';
-import { checkIpBlock, reserveCredentialAttempt } from '../security/attempt-tracker';
+import { eq } from 'drizzle-orm';
+import { getDummyHash, verifyPassword } from './password-hasher';
+import { honeytokens } from '../db/schema';
+import { AccountLockedError, ApiError, IpBlockedError } from '../http/errors';
+import {
+  checkIpBlock,
+  recordIpFailure,
+  reserveCredentialAttempt,
+} from '../security/attempt-tracker';
 import { verifyCaptchaOrThrow } from '../security/captcha';
+import { recordAggregated } from '../security/events';
+import { triggerHoneytoken } from '../security/honeytokens';
 
 export interface LoginAttemptContext {
   ip: string;
@@ -10,6 +19,8 @@ export interface LoginAttemptContext {
   requestId: string;
   now: Date;
   captcha?: unknown;
+  password: string;
+  website?: string;
 }
 
 export const LOGIN_GUARD_STAGE_ORDER = [
@@ -45,7 +56,25 @@ const continueLogin = (): LoginGuardStageResult => ({ status: 'continue' });
  * can be implemented independently without changing the surrounding authentication flow.
  */
 export const LOGIN_GUARD_STAGES: readonly LoginGuardStage[] = [
-  { name: 'honeypot', run: continueLogin },
+  {
+    name: 'honeypot',
+    run: async (context, { db }) => {
+      if (!context.website) return continueLogin();
+      await verifyPassword(await getDummyHash(), context.password);
+      recordIpFailure(db, { ipKey: context.ip, kind: 'HONEYPOT', now: context.now });
+      recordAggregated(db, {
+        type: 'HONEYPOT_TRIGGERED',
+        requestId: context.requestId,
+        ipKey: context.ip,
+        userAgent: context.userAgent,
+        details: {},
+      });
+      return {
+        status: 'refused',
+        error: new ApiError(401, 'AUTH_INVALID_CREDENTIALS', 'Login lub hasło niepoprawne'),
+      };
+    },
+  },
   {
     name: 'ipBlock',
     run: (context, { db, ipFailedAttemptLimit }) => {
@@ -78,7 +107,30 @@ export const LOGIN_GUARD_STAGES: readonly LoginGuardStage[] = [
       return continueLogin();
     },
   },
-  { name: 'honeytoken', run: continueLogin },
+  {
+    name: 'honeytoken',
+    run: (context, { db }) => {
+      const token = db
+        .select()
+        .from(honeytokens)
+        .where(eq(honeytokens.loginNormalized, context.normalizedLogin))
+        .get();
+      if (token?.enabled) {
+        triggerHoneytoken({
+          tokenId: token.id,
+          source: token.kind,
+          ctx: {
+            db,
+            ipKey: context.ip,
+            requestId: context.requestId,
+            userAgent: context.userAgent,
+            now: context.now,
+          },
+        });
+      }
+      return continueLogin();
+    },
+  },
   {
     name: 'accountLock',
     run: (context, { db, maxAttempts }) => {
