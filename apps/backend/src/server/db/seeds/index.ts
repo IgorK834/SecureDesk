@@ -1,4 +1,5 @@
 import type { AppDb } from '../connection';
+import { seedHoneytokens } from './honeytokens';
 import { seedRbac } from './rbac';
 import { seedSecuritySettings } from './security-settings';
 import { seedTickets } from './tickets';
@@ -44,6 +45,7 @@ export async function seedDatabase(
   const { createdUsers, ticketsCreated } = db.transaction((tx) => {
     seedRbac(tx);
     seedSecuritySettings(tx);
+    seedHoneytokens(tx);
     const createdUsers = insertUsers(tx, prepared);
     return { createdUsers, ticketsCreated: demoTickets ? seedTickets(tx) : 0 };
   });

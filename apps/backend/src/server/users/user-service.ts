@@ -2,8 +2,8 @@ import { eq } from 'drizzle-orm';
 import { issueTemporaryCredential } from '../auth/temporary-password';
 import type { AppDb } from '../db/connection';
 import { ConflictError as DbConflictError, mapDbError } from '../db/errors';
-import { users } from '../db/schema';
-import { ApiError } from '../http/errors';
+import { honeytokens, users } from '../db/schema';
+import { ApiError, ValidationError } from '../http/errors';
 import { clock } from '../time/clock';
 import { assertNotProtectedAccount, findLiveAccount, protectedAccount } from './account-service';
 import { normalizeLogin } from './login';
@@ -26,6 +26,14 @@ export interface CreatedUser {
  * there is never an account without its credential (the same order the seed uses).
  */
 export async function createUser(db: AppDb, input: CreateUserInput): Promise<CreatedUser> {
+  const normalizedLogin = normalizeLogin(input.login);
+  const reserved = db
+    .select({ id: honeytokens.id })
+    .from(honeytokens)
+    .where(eq(honeytokens.loginNormalized, normalizedLogin))
+    .get();
+  if (reserved) throw new ValidationError({ field: 'login', reason: 'RESERVED_LOGIN' });
+
   const credential = await issueTemporaryCredential(clock);
   const now = clock.now();
 
@@ -34,7 +42,7 @@ export async function createUser(db: AppDb, input: CreateUserInput): Promise<Cre
       .insert(users)
       .values({
         login: input.login,
-        loginNormalized: normalizeLogin(input.login),
+        loginNormalized: normalizedLogin,
         firstName: input.firstName,
         lastName: input.lastName,
         roleId: roleIdOf(input.role),
