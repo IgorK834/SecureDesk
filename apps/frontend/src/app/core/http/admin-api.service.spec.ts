@@ -295,3 +295,55 @@ describe('AdminApi: security settings', () => {
     }
   });
 });
+
+describe('AdminApi: security events and honeytokens', () => {
+  it('reflects every event filter in the query and omits absent ones', () => {
+    const { api, http } = setUp();
+    api
+      .listSecurityEvents({
+        type: 'HONEYTOKEN_TRIGGERED',
+        severity: 'CRITICAL',
+        acknowledged: false,
+        from: '2030-01-01T00:00:00.000Z',
+        to: '2030-01-02T00:00:00.000Z',
+        page: 2,
+        pageSize: 100,
+      })
+      .subscribe();
+
+    const request = http.expectOne((candidate) => candidate.url === '/api/admin/security-events');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.params.keys().sort()).toStrictEqual([
+      'acknowledged',
+      'from',
+      'page',
+      'pageSize',
+      'severity',
+      'to',
+      'type',
+    ]);
+    expect(request.request.params.get('acknowledged')).toBe('false');
+    expect(request.request.params.get('pageSize')).toBe('100');
+    http.verify();
+  });
+
+  it('lists, acknowledges and tests through encoded same-origin URLs', () => {
+    const { api, http } = setUp();
+    api.listSecurityEvents({ page: 1, pageSize: 20 }).subscribe();
+    const list = http.expectOne('/api/admin/security-events?page=1&pageSize=20');
+    expect(list.request.method).toBe('GET');
+
+    api.acknowledgeSecurityEvent('a/b?x=1').subscribe();
+    const acknowledge = http.expectOne('/api/admin/security-events/a%2Fb%3Fx%3D1/acknowledge');
+    expect(acknowledge.request.method).toBe('POST');
+    expect(acknowledge.request.body).toBeNull();
+
+    api.listHoneytokens().subscribe();
+    expect(http.expectOne('/api/admin/honeytokens').request.method).toBe('GET');
+    api.testHoneytoken('trap/one').subscribe();
+    const test = http.expectOne('/api/admin/honeytokens/trap%2Fone/test');
+    expect(test.request.method).toBe('POST');
+    expect(test.request.body).toBeNull();
+    http.verify();
+  });
+});

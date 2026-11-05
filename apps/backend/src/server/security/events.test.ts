@@ -56,7 +56,7 @@ const decoy = {
   type: 'DECOY_RESOURCE_ACCESSED' as const,
   requestId: 'req-2',
   ipKey: '203.0.113.5',
-  details: { resource: '/api/backup/config' },
+  details: { count: 1, resource: '/api/backup/config' },
 };
 const captchaFailed = {
   type: 'CAPTCHA_FAILED' as const,
@@ -72,6 +72,7 @@ const ALL_TYPES = [
   'CAPTCHA_PROVIDER_ERROR',
   'HONEYPOT_TRIGGERED',
   'HONEYTOKEN_TRIGGERED',
+  'HONEYTOKEN_TESTED',
   'DECOY_RESOURCE_ACCESSED',
   'PASSWORD_SPRAYING_SUSPECTED',
   'CHANGE_PASSWORD_BRUTE_FORCE',
@@ -95,7 +96,7 @@ describe('the event registry', () => {
     expect(probe.success).toBe(false);
   });
 
-  it('makes the honeytoken hits CRITICAL and alerting, and nothing else', () => {
+  it('makes real honeytoken hits CRITICAL and the marked test event alerting', () => {
     const critical = Object.entries(SECURITY_EVENTS)
       .filter(([, definition]) => definition.severity === 'CRITICAL')
       .map(([type]) => type);
@@ -104,7 +105,11 @@ describe('the event registry', () => {
       .map(([type]) => type);
 
     expect(critical.sort()).toStrictEqual(['DECOY_RESOURCE_ACCESSED', 'HONEYTOKEN_TRIGGERED']);
-    expect(alerting.sort()).toStrictEqual(critical.sort());
+    expect(alerting.sort()).toStrictEqual([
+      'DECOY_RESOURCE_ACCESSED',
+      'HONEYTOKEN_TESTED',
+      'HONEYTOKEN_TRIGGERED',
+    ]);
   });
 
   it('aggregates the noisy types', () => {
@@ -114,6 +119,7 @@ describe('the event registry', () => {
 
     expect(aggregated.sort()).toStrictEqual([
       'CAPTCHA_FAILED',
+      'DECOY_RESOURCE_ACCESSED',
       'HONEYPOT_TRIGGERED',
       'LOGIN_IP_BLOCKED',
     ]);
@@ -385,7 +391,7 @@ describe('alerts', () => {
         loginNormalized: null,
         userId: null,
         honeytokenId: null,
-        details: { resource: '/api/backup/config' },
+        details: { count: 1, resource: '/api/backup/config' },
         requestId: 'req-2',
       },
     ]);

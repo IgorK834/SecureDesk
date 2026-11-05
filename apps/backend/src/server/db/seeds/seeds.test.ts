@@ -12,7 +12,14 @@ import {
   sqliteCode,
 } from '../__fixtures__/test-db';
 import type { AppDb } from '../connection';
-import { permissions, rolePermissions, roles, securitySettings, users } from '../schema';
+import {
+  honeytokens,
+  permissions,
+  rolePermissions,
+  roles,
+  securitySettings,
+  users,
+} from '../schema';
 import { type SeedResult, seedDatabase } from '.';
 import { SEED_USERS, insertUsers, prepareNewUsers } from './users';
 
@@ -113,6 +120,31 @@ describe('seedDatabase on an empty database', () => {
         sessionIdleTimeoutMinutes: 15,
       },
     ]);
+  });
+
+  it('registers both honeytokens without creating a user or seed credential for either', async () => {
+    const result = await seedDatabase(db);
+
+    expect(db.select().from(honeytokens).all()).toMatchObject([
+      {
+        id: 'account-trap-backup-admin',
+        kind: 'ACCOUNT_TRAP',
+        loginNormalized: 'backup_admin',
+        alertUrlEnv: 'CANARY_ACCOUNT_TRAP_URL',
+        enabled: true,
+      },
+      {
+        id: 'decoy-aws-keys',
+        kind: 'AWS_KEYS',
+        loginNormalized: null,
+        alertUrlEnv: null,
+        enabled: true,
+      },
+    ]);
+    expect(allUsers().some((user) => user.loginNormalized === 'backup_admin')).toBe(false);
+    expect(result.created.some(({ login }) => normalizeLogin(login) === 'backup_admin')).toBe(
+      false,
+    );
   });
 
   it('gives the six test users a 12-hour temporary password, and ADMIN one that does not lapse', async () => {

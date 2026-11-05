@@ -11,8 +11,7 @@ import { type ExportedHandler, loadRoutes } from './helpers/route-scanner';
 const API_ROOT = path.resolve(__dirname, '../apps/backend/src/app/api');
 const FIXTURES_ROOT = path.resolve(__dirname, 'fixtures/conformance');
 
-// The only routes allowed to say `auth: 'public'`. Future CAPTCHA challenge and backup-config
-// handlers are reviewed here before their task adds the files; anything else still fails closed.
+// The only routes allowed to say `auth: 'public'`; anything else still fails closed.
 const PUBLIC_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
   '/api/health',
   '/api/auth/login',
@@ -54,6 +53,7 @@ describe('route guard conformance: the real API', () => {
     expect(found).toEqual(
       expect.arrayContaining([
         'GET /api/health',
+        'GET /api/backup/config',
         'GET /api/captcha/config',
         'POST /api/captcha/challenge',
         'POST /api/auth/login',
@@ -77,6 +77,7 @@ describe('route guard conformance: the real API', () => {
 
     expect(publicRoutes).toEqual([
       '/api/auth/login',
+      '/api/backup/config',
       '/api/captcha/challenge',
       '/api/captcha/config',
       '/api/health',

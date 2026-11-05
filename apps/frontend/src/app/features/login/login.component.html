@@ -6,6 +6,18 @@
   }
 
   <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <div class="website-honeypot" aria-hidden="true">
+      <label for="website">Website</label>
+      <input
+        id="website"
+        name="website"
+        type="text"
+        formControlName="website"
+        tabindex="-1"
+        autocomplete="off"
+      />
+    </div>
+
     <div class="field">
       <label for="login">Login</label>
       <input

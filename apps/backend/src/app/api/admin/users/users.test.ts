@@ -26,6 +26,7 @@ import {
   tickets,
   users,
 } from '../../../../server/db/schema';
+import { seedHoneytokens } from '../../../../server/db/seeds/honeytokens';
 import { DEMO_TICKETS, seedTickets } from '../../../../server/db/seeds/tickets';
 import { PERMISSIONS, ROLES } from '../../../../server/permissions/codes';
 import { resetPassword } from '../../../../server/users/account-service';
@@ -643,6 +644,20 @@ describe('POST /api/admin/users: what is created', () => {
 });
 
 describe('POST /api/admin/users: what is refused', () => {
+  it.each(['backup_admin', 'BACKUP_ADMIN', 'Backup_Admin'])(
+    'SEC-52 reserves the account-trap login case-insensitively (%s)',
+    async (login) => {
+      db.transaction((tx) => seedHoneytokens(tx));
+      const before = userCount();
+
+      const response = await apiCreate(asUser('ADMIN'), { ...NEW_USER, login });
+
+      expect(response.status).toBe(400);
+      expect(await errorCode(response)).toBe('VALIDATION_ERROR');
+      expect(userCount()).toBe(before);
+    },
+  );
+
   it.each([
     ['Administrator', { role: 'ADMINISTRATOR' }],
     ['ROOT', { role: 'ROOT' }],

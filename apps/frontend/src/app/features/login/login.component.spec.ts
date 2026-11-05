@@ -84,6 +84,20 @@ describe('LoginComponent', () => {
     );
   });
 
+  it('SEC-50 keeps the honeypot off-screen, outside the tab order and accessibility tree', () => {
+    const { root } = setup();
+    const wrapper = root.querySelector('.website-honeypot') as HTMLDivElement;
+    const input = wrapper.querySelector('input') as HTMLInputElement;
+
+    expect(wrapper.getAttribute('aria-hidden')).toBe('true');
+    expect(getComputedStyle(wrapper).position).toBe('absolute');
+    expect(getComputedStyle(wrapper).display).not.toBe('none');
+    expect(input.type).toBe('text');
+    expect(input.name).toBe('website');
+    expect(input.tabIndex).toBe(-1);
+    expect(input.autocomplete).toBe('off');
+  });
+
   it.each(['login', 'password'])('submits when Enter is pressed in the %s field', (id) => {
     const pending = new Subject<LoginResponse>();
     const { api, root, valid } = setup(pending);
@@ -98,6 +112,7 @@ describe('LoginComponent', () => {
       login: 'employee1',
       password: 'private value',
       captcha,
+      website: '',
     });
   });
 
@@ -192,7 +207,7 @@ describe('LoginComponent', () => {
       (root.querySelector('button[type="submit"]') as HTMLButtonElement).click();
       fixture.detectChanges();
 
-      expect(root.querySelector('[aria-hidden="true"]')?.textContent).toBe(
+      expect(root.querySelector('[role="alert"] [aria-hidden="true"]')?.textContent).toBe(
         'Too many attempts from this network. Try again in 00:42.',
       );
       expect(root.textContent).not.toContain('server text is not rendered');
@@ -221,7 +236,7 @@ describe('LoginComponent', () => {
       fixture.detectChanges();
       expect(live()).toContain('14:00');
       expect(root.querySelector('[role="alert"]')?.getAttribute('aria-live')).toBe('polite');
-      expect(root.querySelector('[aria-hidden="true"]')).not.toBeNull();
+      expect(root.querySelector('[role="alert"] [aria-hidden="true"]')).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }

@@ -9,6 +9,7 @@ const context = {
   userAgent: 'vitest',
   requestId: 'request-id',
   now: new Date('2026-03-10T12:00:00.000Z'),
+  password: 'not a real credential',
 };
 
 afterEach(() => vi.restoreAllMocks());

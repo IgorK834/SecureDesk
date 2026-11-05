@@ -21,6 +21,8 @@ data/
 # Local scratch space
 .local/
 tests/e2e/.credentials.json
+output/bot-sim-report.json
+output/bot-sim-summary.md
 
 # OS / editors
 .DS_Store

@@ -23,6 +23,13 @@ validator is treated as an authorization control.
 | Stale access after account changes | Blocked/deleted/reset user keeps a session                  | Administrative mutations revoke all target sessions transactionally                                                       | SEC-18 to SEC-20                                 |
 | TOTP secret disclosure             | Database copy reveals the second factor                     | AES-256-GCM envelope with a separately managed 32-byte key; the URI is returned once during enrollment                    | TOTP integration tests                           |
 | TOTP replay or guessing            | Reused/current-code guessing bypasses the second factor     | Restricted challenge stage, accepted-step replay marker, one-step drift and five failures per 15 minutes per session      | TOTP integration and service tests               |
+| Brute-force login guessing         | Many passwords are tried against one account                | CAPTCHA before account work, atomic Nth-failure lock, 15-minute countdown and administrator unlock                        | SEC-31, SEC-38, SEC-40 and browser lockout spec  |
+| Credential stuffing                | Leaked login/password pairs are replayed                    | Per-account lock, per-address failure limit, uniform unknown-account path and spraying telemetry                          | SEC-31, SEC-34, SEC-55 and bot simulation        |
+| Password spraying                  | One popular password is tried across many accounts          | Per-address limit plus distinct-login detection; account locks remain a second layer                                      | SEC-55 and bot simulation                        |
+| CAPTCHA forgery or replay          | Client invents or reuses a solved proof                     | Server-side provider choice; one-time internal update; Turnstile action, hostname, age and siteverify checks; fail closed | SEC-42 to SEC-48                                 |
+| Form-filling automation            | A generic bot submits every visible-looking field           | Off-screen, keyboard-inert honeypot; generic response, address-only strike and event                                      | SEC-49, SEC-50                                   |
+| Decoy/trap discovery               | An intruder probes bait credentials or a trap login         | Account honeytoken, backup decoy, persistent CRITICAL event, deduplicated background alert                                | SEC-51, SEC-53, SEC-54                           |
+| Security-event disclosure          | A non-admin reads attacker telemetry or alert metadata      | Administrator-only permissions and explicit DTOs with a recursive secret-key guard                                        | SEC-58                                           |
 
 ## Administrative TOTP recovery
 
@@ -42,3 +49,13 @@ high-availability cluster. Browser compromise, malware, a stolen unlocked device
 the server or environment secrets remain outside what application-layer controls can fully prevent.
 Production deployment additionally needs HTTPS, protected backups, key rotation, monitoring and an
 operational incident-response process.
+
+Module 2 intentionally accepts several trade-offs. A local image CAPTCHA is demonstrative and weak
+against OCR, and it needs an accessible alternative modality. A third-party provider improves the
+challenge but adds availability, privacy, latency, CSP and vendor-dependency risks; strict mode
+therefore fails password change closed, while an optional bounded internal fallback must be enabled
+explicitly. Account lockout can be weaponized for denial of service, so CAPTCHA precedes account
+counting, lock duration is finite, an audited administrator unlock exists and nonexistent logins get
+the same phantom-lock behavior. Per-address limits reduce spraying but can affect innocent users
+behind NAT or a privacy relay. Honeytokens are high-signal only when legitimate scanners and backup
+jobs are prevented from touching the lure.

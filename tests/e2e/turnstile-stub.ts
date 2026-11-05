@@ -7,17 +7,27 @@ const server = createServer((request, response) => {
     return;
   }
   if (request.method === 'POST' && request.url === '/siteverify') {
-    request.resume();
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => {
+      body += chunk;
+    });
     request.on('end', () => {
+      const token = new URLSearchParams(body).get('response');
+      const forged = token === 'forged-token';
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
-        JSON.stringify({
-          success: true,
-          action: 'change-password',
-          hostname: 'localhost',
-          // A real token is issued before verification starts; keep the stub timestamp in the past.
-          challenge_ts: new Date(Date.now() - 1_000).toISOString(),
-        }),
+        JSON.stringify(
+          forged
+            ? { success: false, 'error-codes': ['invalid-input-response'] }
+            : {
+                success: true,
+                action: 'change-password',
+                hostname: 'localhost',
+                // A real token is issued before verification starts; keep the stub timestamp in the past.
+                challenge_ts: new Date(Date.now() - 1_000).toISOString(),
+              },
+        ),
       );
     });
     return;

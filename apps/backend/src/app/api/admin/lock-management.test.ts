@@ -66,7 +66,7 @@ const clearIpBlock = (client: ApiClient, ipKey: string) =>
   });
 
 describe('administrator account unlock', () => {
-  it('shows and filters the lock, then clears its counter immediately and records the actor', async () => {
+  it('SEC-38 shows and filters the lock, then clears its counter immediately and records the actor', async () => {
     const employeeId = ids.employee1 as string;
     const loginNormalized = db
       .select({ login: users.loginNormalized })

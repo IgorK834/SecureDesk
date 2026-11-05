@@ -103,6 +103,15 @@ export const routes: Routes = [
       import('./features/admin-security/ip-blocks.component').then((m) => m.IpBlocksComponent),
   },
   {
+    path: 'admin/security-events',
+    title: 'Security events',
+    ...requires('security-events:read'),
+    loadComponent: () =>
+      import('./features/admin-security-events/security-events.component').then(
+        (m) => m.SecurityEventsComponent,
+      ),
+  },
+  {
     path: 'tickets',
     title: 'Tickets',
     ...requires(READ_TICKETS),

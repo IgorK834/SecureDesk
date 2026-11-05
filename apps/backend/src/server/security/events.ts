@@ -59,10 +59,19 @@ export const SECURITY_EVENTS = {
     alert: true,
     details: z.strictObject({ trapKind: z.enum(['ACCOUNT_TRAP', 'AWS_KEYS']) }),
   },
+  HONEYTOKEN_TESTED: {
+    severity: 'INFO',
+    alert: true,
+    details: z.strictObject({
+      test: z.literal(true),
+      trapKind: z.enum(['ACCOUNT_TRAP', 'AWS_KEYS']),
+    }),
+  },
   DECOY_RESOURCE_ACCESSED: {
     severity: 'CRITICAL',
+    aggregated: true,
     alert: true,
-    details: z.strictObject({ resource: shortText }),
+    details: z.strictObject({ count, resource: shortText }),
   },
   PASSWORD_SPRAYING_SUSPECTED: {
     severity: 'WARNING',
@@ -319,7 +328,7 @@ export function recordAggregated(db: AppDb, input: AggregatedEventInput): string
   const bucketStart = new Date(now - (now % AGGREGATION_BUCKET_MS));
   const bucketEnd = new Date(bucketStart.getTime() + AGGREGATION_BUCKET_MS);
 
-  const id = db.transaction(
+  const result = db.transaction(
     (tx) => {
       const existing = tx
         .select({ id: securityEvents.id, details: securityEvents.details })
@@ -340,16 +349,17 @@ export function recordAggregated(db: AppDb, input: AggregatedEventInput): string
           .set({ details: JSON.stringify({ ...stored, count: stored.count + 1 }) })
           .where(eq(securityEvents.id, existing.id))
           .run();
-        return existing.id;
+        return { id: existing.id };
       }
 
       const row = newRow(input, details);
       tx.insert(securityEvents).values(row).run();
-      return row.id;
+      return { id: row.id, row };
     },
     { behavior: 'immediate' },
   );
 
-  purgeIfDue(db);
-  return id;
+  if (result.row) afterInsert(db, result.row, details);
+  else purgeIfDue(db);
+  return result.id;
 }

@@ -150,6 +150,30 @@ the aggregated `LOGIN_IP_BLOCKED` event. CAPTCHA failures and honeypot hits use 
 `recordIpFailure` insertion point. A failed credential that reaches eight distinct normalized
 logins for the address emits `PASSWORD_SPRAYING_SUSPECTED` once per five-minute event bucket.
 
+The login form also contains a text input named `website` inside an `aria-hidden` wrapper. It is
+positioned off-screen, has `tabindex="-1"` and `autocomplete="off"`, and is neither hidden by input
+type nor `display:none`. A non-empty value stops at the first pipeline stage: the server performs
+one dummy Argon2 verification, adds only an address-level `HONEYPOT` failure and the aggregated
+`HONEYPOT_TRIGGERED` event, and returns the ordinary invalid-credentials response. CAPTCHA and
+account counters are not consulted. The empty value is included in the normal Angular request so
+the server behavior is exercised by every browser journey.
+
+The field name was kept as `website`, the assignment's conventional form-filler bait. Component
+and Chromium end-to-end tests prove that it is absent from the accessibility tree, skipped by Tab,
+left empty by the normal login journey and not `display:none`. Native profile/password-manager
+autofill is intentionally a manual release check because CI browsers have no saved user profile:
+
+| Autofill client           | Result                                                           |
+| ------------------------- | ---------------------------------------------------------------- |
+| Chrome profile autofill   | Pending manual run with a disposable profile                     |
+| Firefox profile autofill  | Pending manual run with a disposable profile                     |
+| Safari profile autofill   | Pending manual run with a disposable profile                     |
+| Deployed password manager | Pending; record product/version and use a disposable vault entry |
+
+For each pass, save only disposable SecureDesk credentials, load `/login`, invoke autofill, and
+confirm `document.querySelector('#website').value === ''` before submitting. A product/version that
+fills the field blocks release until the bait name or markup is changed and the matrix is rerun.
+
 The account-lock stage uses append-only `login_attempts` rows. Its `BEGIN IMMEDIATE` transaction
 counts recent `PENDING` and `FAILED` credential rows after the last `SUCCESS` or `CLEARED` marker,
 then inserts a reservation. This makes the administrator's `maxFailedLoginAttempts` setting
@@ -677,19 +701,43 @@ a fixed severity (`INFO`, `WARNING`, `CRITICAL`) and a strict Zod schema for its
   matching `/password|token|secret|answer|captcha/i`, is refused: it throws outside production (so a
   mistake is found in development and tests) and is dropped in production (so it never fails a
   request). The message names the key, never a value. The user agent is cut to 200 characters.
-- **Aggregation.** The noisy types (`CAPTCHA_FAILED`, `HONEYPOT_TRIGGERED`, `LOGIN_IP_BLOCKED`) go
-  through `recordAggregated`: one row per type, address key and 5-minute bucket, with the count in
-  `details.count`, so a bot cannot flood the table (1000 identical events are one row with
-  `count = 1000`).
+- **Aggregation.** The noisy types (`CAPTCHA_FAILED`, `HONEYPOT_TRIGGERED`, `LOGIN_IP_BLOCKED`,
+  `DECOY_RESOURCE_ACCESSED`) go through `recordAggregated`: one row per type, address key and
+  5-minute bucket, with the count in `details.count`, so a bot cannot flood the table (1000
+  identical events are one row with `count = 1000`). Only the first decoy access in a bucket starts
+  alert delivery.
 - **Alerts** (`server/security/alerts.ts`). An `AlertDispatcher` is `{ id, send(event) }` and is
   registered in a small registry. A type that asks for an alert (the two `CRITICAL` honeytoken
   types) is stored with `alert_status = PENDING`, handed to every dispatcher **in the background**
-  under a hard timeout (3 s), and `alert_status` and `alert_attempted_at` are written back:
+  under a hard timeout (3 s for a single-attempt dispatcher; the two-attempt dispatchers declare a
+  bounded total), and `alert_status` and `alert_attempted_at` are written back:
   `SENT`, `SUPPRESSED` (a deliberate duplicate suppression) or `FAILED`. A dispatcher that throws,
   rejects or hangs only makes the status `FAILED`. The event is stored before anything is
   dispatched and the caller never waits, so an alert channel can neither fail a request nor lose an
   event. Dispatchers receive the event without the user agent, and never anything outside the
   declared `details`.
+- **Honeytoken channels.** `CanarytokensDispatcher` calls the secret Web-bug URL named by the
+  account-trap row, with only the local event id and static label in `User-Agent`. The optional
+  `WebhookAlertDispatcher` posts exactly `type`, `time`, `severity` and `eventId` to the
+  administrator-controlled HTTPS `ALERT_WEBHOOK_URL`. Both retry once, deduplicate per event type
+  and address for five minutes, and are off when their environment configuration is absent.
+- **AWS decoy.** Public `GET /api/backup/config` is an intentional lure, also advertised by
+  `robots.txt`. It always returns a believable backup shape with `Cache-Control: no-store`; the two
+  credential values come only from `CANARY_DECOY_AWS_ACCESS_KEY_ID` and
+  `CANARY_DECOY_AWS_SECRET_ACCESS_KEY`, or harmless placeholder text when unset. Every fetch updates
+  the `decoy-aws-keys` honeytoken and records the aggregated CRITICAL event. The application does
+  not call AWS: using the planted credentials is what lets the external token provider observe the
+  misuse.
+- **Administrator event view.** `GET /api/admin/security-events` selects only the DTO columns and
+  validates stored `details` again before serialization; raw login, user-agent and honeytoken
+  linkage never enter the response. Strict filters cover type, severity, acknowledgement and UTC
+  range, with newest-first pages capped at 100. Acknowledgement is an idempotent first-write-wins
+  update carrying the administrator id and UTC time. The Angular banner requests only
+  `severity=CRITICAL&acknowledged=false&pageSize=1`, once on each completed navigation and never on
+  a timer, so an idle page does not keep touching its session.
+- **Honeytoken administration.** The status endpoint selects only id, kind, label, enabled state,
+  last-triggered time and count. A test action writes the alerting `HONEYTOKEN_TESTED` INFO event
+  and dispatches it with an explicit `TEST` marker, without changing either trigger counter field.
 
 **Retention and GDPR.** An IP address and a user agent are personal data (GDPR), and so is a login
 name that somebody typed. They are kept only as long as they serve the defence:
@@ -755,3 +803,11 @@ password-change forms; the client re-reads config after a provider-unavailable s
 or the cool-down expiry resets the consecutive-failure state. Because this simple breaker is
 process-local, a multi-instance deployment needs shared breaker state if every instance must switch
 at exactly the same time.
+
+The browser suite never depends on a provider network. Its backend process sets the login provider
+to internal with `CAPTCHA_TEST_MODE=true`; `TEST-SOLVED` is accepted only after an issued challenge
+and consumes it exactly once. Playwright intercepts the Turnstile script URL and exposes the same
+explicit-render callback contract, while `TURNSTILE_VERIFY_URL` points the backend to a localhost
+stub. Production startup rejects both test overrides and all published Cloudflare dummy-key
+families. Hosted Canarytokens delivery is similarly excluded from CI: the local CRITICAL event is
+the automated assertion, and the redacted e-mail is a separate operator-run evidence step.

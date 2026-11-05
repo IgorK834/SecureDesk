@@ -25,6 +25,8 @@ export interface AlertResult {
 /** A way to tell a person about an event (an HTTP call, an e-mail, a chat message). */
 export interface AlertDispatcher {
   readonly id: string;
+  /** Defaults to the ordinary 3-second budget; retrying dispatchers may declare their total. */
+  readonly timeoutMs?: number;
   send(event: SecurityEventRecord): Promise<AlertResult>;
 }
 
@@ -82,7 +84,10 @@ export async function dispatchAlerts(
   const outcomes = await Promise.all(
     targets.map(async (target): Promise<'SENT' | 'SUPPRESSED' | 'FAILED'> => {
       try {
-        const result = await withTimeout((async () => target.send(event))(), timeoutMs);
+        const result = await withTimeout(
+          (async () => target.send(event))(),
+          target.timeoutMs ?? timeoutMs,
+        );
         return result?.outcome === 'SUPPRESSED' ? 'SUPPRESSED' : 'SENT';
       } catch {
         return 'FAILED';

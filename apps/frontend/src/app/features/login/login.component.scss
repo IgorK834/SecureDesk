@@ -9,6 +9,14 @@
   margin-block: 1rem;
 }
 
+.website-honeypot {
+  position: absolute;
+  inset-inline-start: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 input {
   font: inherit;
   padding: 0.5rem;

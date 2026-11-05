@@ -43,6 +43,7 @@ export class LoginComponent {
   readonly form = this.fb.nonNullable.group({
     login: ['', [Validators.required, Validators.maxLength(64)]],
     password: ['', [Validators.required]],
+    website: [''],
   });
   readonly submitting = signal(false);
   protected readonly submitted = signal(false);
@@ -74,8 +75,8 @@ export class LoginComponent {
     this.submitting.set(true);
     this.errorMessage.set(null);
     this.stopCountdown();
-    const { login, password } = this.form.getRawValue();
-    this.api.login({ login: login.trim(), password, captcha }).subscribe({
+    const { login, password, website } = this.form.getRawValue();
+    this.api.login({ login: login.trim(), password, captcha, website }).subscribe({
       next: (response) => {
         this.resetCaptcha();
         this.auth.setSession(response);
