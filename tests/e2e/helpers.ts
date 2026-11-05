@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
 export const E2E_DATABASE_PATH = path.resolve('data/securedesk.e2e.sqlite');
 export const E2E_CREDENTIALS_PATH = path.resolve('tests/e2e/.credentials.json');
+export const MODULE_2_EVIDENCE_DIR = path.resolve('docs/report-evidence/module-2');
 
 export interface E2eCredential {
   login: string;
@@ -28,7 +29,7 @@ export function freshPassword(): string {
   return `Fresh-${randomBytes(18).toString('base64url')}!7`;
 }
 
-async function installTurnstileStub(page: Page): Promise<void> {
+export async function installTurnstileStub(page: Page): Promise<void> {
   await page.route(
     'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit',
     (route) =>
