@@ -67,6 +67,7 @@ describe('LoginComponent with the internal CAPTCHA provider', () => {
       login: 'employee1',
       password: 'private value',
       captcha: { challengeId: 'challenge-1', answer: 'TEST-SOLVED' },
+      website: '',
     });
     expect(challenge).toHaveBeenCalledTimes(2);
     expect(auth.setSession).toHaveBeenCalledOnce();
