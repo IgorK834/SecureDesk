@@ -38,6 +38,15 @@ requires every listed identifier to occur in a real `describe`, `it` or `test` t
 | SEC-28 | Strict update schemas reject hidden privileged fields.                         |
 | SEC-29 | Direct mutations of the protected ADMIN account are rejected.                  |
 | SEC-30 | An unexpired server-side session survives reopening the persistent database.   |
+| SEC-31 | The configured fifth credential failure locks the account.                     |
+| SEC-32 | A lock remains at 14:59 and ends exactly at 15:00 under the fake clock.        |
+| SEC-33 | Correct credentials cannot bypass a live account lock.                         |
+| SEC-34 | Existing, unknown and account-trap logins expose identical refusal envelopes.  |
+| SEC-35 | A successful login resets the prior credential-failure sequence.               |
+| SEC-36 | A fifty-request parallel burst admits at most five credential checks.          |
+| SEC-37 | Login-protection settings enforce their documented database and API ranges.    |
+| SEC-38 | Only an administrator can clear an account lock, and the action is audited.    |
+| SEC-39 | A temporary account lock never changes the administrator block flag.           |
 | SEC-40 | Missing login CAPTCHA stops before password verification or account counting.  |
 | SEC-41 | Wrong, expired and reused login challenges count only against the address.     |
 | SEC-42 | Turnstile binds success to action, hostname and the 120-second lifetime.       |
@@ -47,6 +56,19 @@ requires every listed identifier to occur in a real `describe`, `it` or `test` t
 | SEC-46 | An internal challenge is consumed by the first answer, right or wrong.         |
 | SEC-47 | The internal challenge passes at 119 seconds and fails at 121 seconds.         |
 | SEC-48 | Original-order text fails while its reversed form succeeds.                    |
+| SEC-49 | A filled login honeypot returns the generic 401 and counts only by address.    |
+| SEC-50 | Empty/absent honeypots pass; the off-screen field is inaccessible to users.    |
+| SEC-51 | Account-trap triggers are stored, externally alerted once, and deduplicated.   |
+| SEC-52 | The account-trap login is reserved case-insensitively and has no user row.     |
+| SEC-53 | The AWS decoy returns only planted values and records one aggregated alert.    |
+| SEC-54 | A failed or hanging alert channel cannot delay or fail the triggering request. |
+| SEC-55 | Twenty failures from one address cause the next login to be IP-blocked.        |
+| SEC-56 | Rotating the untrusted left side of X-Forwarded-For cannot evade that block.   |
+| SEC-57 | Eight distinct login failures from one address raise a spraying event.         |
+| SEC-58 | Only administrators list, filter and acknowledge redacted security events.     |
+| SEC-59 | Account and address locks remain active after reopening the SQLite database.   |
+| SEC-60 | Repeated current-password failures lock password change and revoke sessions.   |
+| SEC-61 | The bot simulator refuses an external target without two explicit consents.    |
 | SEC-62 | Production startup rejects dummy keys and every test-only CAPTCHA bypass.      |
 
 API tests invoke the exported Next.js route handlers with real `Request` objects and the cookie
@@ -60,11 +82,14 @@ forced at the transaction boundary without real sleeping.
 The required mutation check was performed against the deterministic unit suite. Each mutation was
 reverted immediately after observing the named failure:
 
-| Temporary mutation                                  | Test that fails                                                                                                            |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Change `MIN_PASSWORD_LENGTH` from 12 to 11          | `length (SEC-09, SEC-10) > never lets a configured minimum drop below the variant-2 floor of 12`                           |
-| Change temporary expiry comparison from `>=` to `>` | `the 12-hour lifetime (SEC-06, SEC-07) > is valid up to 1 ms before the deadline and expired from exactly the deadline on` |
-| Remove lower-casing from personal-data comparison   | `personal-data rule enabled (SEC-11) > rejects the first name in upper case`                                               |
+| Temporary mutation                                          | Test that fails                                                                                                            |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Change `MIN_PASSWORD_LENGTH` from 12 to 11                  | `length (SEC-09, SEC-10) > never lets a configured minimum drop below the variant-2 floor of 12`                           |
+| Change temporary expiry comparison from `>=` to `>`         | `the 12-hour lifetime (SEC-06, SEC-07) > is valid up to 1 ms before the deadline and expired from exactly the deadline on` |
+| Remove lower-casing from personal-data comparison           | `personal-data rule enabled (SEC-11) > rejects the first name in upper case`                                               |
+| Move the lock row from `limit - 1` to `limit` (`>=` to `>`) | `SEC-31 and SEC-39: locks on the fifth failure without changing the account block flag`                                    |
+| Remove the login CAPTCHA guard stage                        | `returns CAPTCHA_REQUIRED before password verification or account-lock reservation (SEC-40)`                               |
+| Make the account-honeytoken login comparison case-sensitive | `SEC-52 reserves the account-trap login case-insensitively`                                                                |
 
 The temporary-password boundary suite uses only `FakeClock`; it never sleeps. Fixtures use
 synthetic values generated inside tests and contain no deployable or reusable credentials.
@@ -92,18 +117,41 @@ that isolated database, migrates and seeds it, then writes generated credentials
 `tests/e2e/.credentials.json` with mode `0600`. The suite has one worker and zero retries so tests do
 not race over shared settings and a flaky first attempt cannot be hidden.
 
-| Journey                                                             | Spec                                                 | Evidence                          |
-| ------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------- |
-| Wrong and unknown login share the neutral error                     | `login-failure.spec.ts`                              | `01-failed-login.png`             |
-| Administrator creates an Employee; first login forces replacement   | `first-login.spec.ts`                                | `02`, `04`, `04b`, `05`           |
-| Argon2id hashes, not plaintext, are visible in an isolated DB query | `hash-evidence.spec.ts` and `scripts/show-hashes.sh` | `03-hash-in-database.png`         |
-| Create, block, unblock, reset and delete revoke access as expected  | `admin-flows.spec.ts`                                | assertions in the named spec      |
-| A valid Guest cookie receives API status 403                        | `forbidden.spec.ts`                                  | `06-http-403-guest-admin-api.png` |
-| The next action after 65 seconds with a one-minute limit logs out   | `idle-timeout.spec.ts` (`@slow`)                     | `07-idle-logout.png`              |
-| HTML-looking ticket title remains literal text and executes nothing | `xss-ticket.spec.ts`                                 | SEC-26 browser assertion          |
+| Journey                                                             | Spec                                                 | Evidence                                   |
+| ------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| Wrong and unknown login share the neutral error                     | `login-failure.spec.ts`                              | `01-failed-login.png`                      |
+| Administrator creates an Employee; first login forces replacement   | `first-login.spec.ts`                                | `02`, `04`, `04b`, `05`                    |
+| Argon2id hashes, not plaintext, are visible in an isolated DB query | `hash-evidence.spec.ts` and `scripts/show-hashes.sh` | `03-hash-in-database.png`                  |
+| Create, block, unblock, reset and delete revoke access as expected  | `admin-flows.spec.ts`                                | assertions in the named spec               |
+| A valid Guest cookie receives API status 403                        | `forbidden.spec.ts`                                  | `06-http-403-guest-admin-api.png`          |
+| A session backdated by 65 seconds with a one-minute limit logs out  | `idle-timeout.spec.ts`                               | `07-idle-logout.png`                       |
+| HTML-looking ticket title remains literal text and executes nothing | `xss-ticket.spec.ts`                                 | SEC-26 browser assertion                   |
+| Keyboard skips the off-screen honeypot; bot-filled value is trapped | `honeypot.spec.ts`                                   | SEC-49/SEC-50 browser assertion            |
+| Robots advertises and the public backup decoy returns the lure      | `decoy.spec.ts`                                      | SEC-53 browser/API assertion               |
+| Lockout countdown and administrator unlock work in a browser        | `lockout.spec.ts`                                    | `module-2/m2-01-account-lockout.png`       |
+| A fresh internal CAPTCHA is required for each login attempt         | `captcha-login.spec.ts`                              | `module-2/m2-02-login-captcha.png`         |
+| Password change renders Turnstile; a forged token gets API 403      | `captcha-password-change.spec.ts`                    | `module-2/m2-03*`, `m2-04*`                |
+| Account trap and backup decoy create visible CRITICAL events        | `honeytoken.spec.ts`                                 | `module-2/m2-05*`, `m2-06*`                |
+| Trap alert appears, is acknowledged, and remains admin-only         | `security-events.spec.ts`                            | `module-2/m2-08-security-events.png`       |
+| Nine guarded bot attacks produce a repeatable protection matrix     | `bot-sim.spec.ts`                                    | `module-2/m2-07-bot-simulation-result.png` |
 
 Run the complete suite with `npx playwright test`. A clean run recreates every evidence image. Three
-consecutive full runs with retries disabled are the release check for determinism.
+consecutive full runs with retries disabled are the release check for determinism. On 2026-11-05,
+`npm run test:e2e:module2` completed three consecutive runs with the same result: 7/7, 7/7 and 7/7.
+The configuration used one worker and `retries: 0`.
+
+The Module 2 suite is hermetic: internal CAPTCHA test mode still creates one-time, expiring
+challenges; Playwright supplies the Turnstile `api.js` widget; and the backend uses the local
+siteverify stub. The stub rejects `forged-token`, which lets the browser test capture an actual
+`403 CAPTCHA_FAILED` API response. No automated run reaches Cloudflare, Canarytokens or AWS.
+
+The bot evidence run is `npm run bot-sim -- --target http://127.0.0.1:3000 --origin
+http://localhost:4200 --database data/securedesk.e2e.sqlite`. It uses the internal CAPTCHA test
+answer, but every challenge remains one-time and time-limited. The script prints the legal warning,
+limits itself to 20 requests per second and 150 total requests, and writes deterministic JSON and
+Markdown reports under `output/`. A non-local target is refused unless its exact hostname is passed
+with `--allow-host` and `BOTSIM_I_OWN_THE_TARGET=1` is set. The database guard independently refuses
+any filename without an `.e2e.` marker.
 
 ## Manual Turnstile check
 
@@ -135,3 +183,6 @@ unit, component and handler suite. The same command checks SEC identifier tracea
 image files outside `docs/report-evidence/`. Integration fixtures use a fresh temporary SQLite file,
 run migrations, close the connection and remove the directory after the case; they never open the
 development database. The session-restart case deliberately closes and reopens its temporary file.
+No automated test waits for wall-clock time: unit boundaries use `FakeClock`, and the browser idle
+journey backdates only its active row in the isolated E2E database before exercising the real
+server-side expiry path.
