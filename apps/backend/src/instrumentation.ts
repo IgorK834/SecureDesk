@@ -4,8 +4,10 @@
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+  const { assertAuditSubjectConfig } = await import('./server/audit/subject');
   const { assertCaptchaConfig } = await import('./server/security/captcha');
   const { warnAboutClientIpConfiguration } = await import('./server/security/client-ip');
   assertCaptchaConfig();
+  assertAuditSubjectConfig();
   warnAboutClientIpConfiguration();
 }

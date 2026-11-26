@@ -11,6 +11,7 @@ const complete = {
   TURNSTILE_SECRET_KEY: 'production-secret-key',
   CAPTCHA_EXPECTED_HOSTNAME: 'securedesk.example',
   TRUST_PROXY: 'true',
+  AUDIT_SUBJECT_PEPPER: 'synthetic-audit-key-for-startup-tests',
 };
 
 function configure(overrides: Record<string, string> = {}): void {
@@ -20,6 +21,20 @@ function configure(overrides: Record<string, string> = {}): void {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+describe('server startup audit subject assertion', () => {
+  it.each([
+    undefined,
+    ' ',
+    'replace-with-output-of-openssl-rand-base64-32',
+    'changeme',
+    'securedesk-local-development-audit-subject',
+  ])('refuses missing or placeholder production pepper (%s)', async (pepper) => {
+    configure();
+    vi.stubEnv('AUDIT_SUBJECT_PEPPER', pepper);
+    await expect(register()).rejects.toThrow(/AUDIT_SUBJECT_PEPPER/);
+  });
 });
 
 describe('server startup CAPTCHA assertion (SEC-62)', () => {
