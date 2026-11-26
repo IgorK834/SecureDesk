@@ -84,6 +84,9 @@ requires every listed identifier to occur in a real `describe`, `it` or `test` t
 | SEC-74 | 50 concurrent appends across connections produce one gapless hash chain.        |
 | SEC-75 | Independent hashing reproduces stored hashes from the zero-filled genesis.       |
 | SEC-76 | SQLite aborts audit log updates, deletes and replacements.                       |
+| SEC-79 | The audit read API limits access and filters and pages by sequence.              |
+| SEC-80 | CSV and JSON Lines exports contain the selected rows and their hashes.          |
+| SEC-81 | Viewing is throttled per session and exports are recorded before streaming.    |
 
 API tests invoke the exported Next.js route handlers with real `Request` objects and the cookie
 jar in `tests/helpers/api-client.ts`; no Angular code is involved. Database fixtures create an
@@ -139,6 +142,9 @@ the fake clock to select exact 30-second steps and never wait for a real authent
 | Administrator recovery clears the encrypted state and revokes sessions            | administrator TOTP recovery route test           |
 
 ## Browser end-to-end suite
+
+Set `SECUREDESK_E2E_DIR` to a temporary directory to isolate the SQLite database, browser test
+credentials, screenshots and Playwright report for a run.
 
 Playwright starts Next.js and Angular against `data/securedesk.e2e.sqlite`. Global setup deletes only
 that isolated database, migrates and seeds it, then writes generated credentials to the git-ignored
