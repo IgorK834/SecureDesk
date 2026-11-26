@@ -66,6 +66,7 @@ describe('navigation per role, derived from the backend matrix', () => {
       '/admin/security',
       '/admin/ip-blocks',
       '/admin/security-events',
+      '/admin/audit-log',
     ]);
     expect(routes.filter((route) => route.startsWith('/tickets'))).toStrictEqual([]);
   });
