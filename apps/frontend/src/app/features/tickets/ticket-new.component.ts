@@ -32,23 +32,6 @@ import { TicketsApiService } from './tickets-api.service';
       <a routerLink="/tickets">Cancel</a>
     </form>
   `,
-  styles: `
-    .field {
-      display: flex;
-      flex-direction: column;
-      max-width: 38rem;
-      margin-block: 1rem;
-    }
-    textarea {
-      min-height: 10rem;
-    }
-    .error {
-      color: #b3261e;
-    }
-    button {
-      margin-inline-end: 0.75rem;
-    }
-  `,
 })
 export class TicketNewComponent {
   private readonly api = inject(TicketsApiService);

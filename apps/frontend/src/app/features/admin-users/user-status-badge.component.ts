@@ -23,32 +23,6 @@ import { STATUS_LABELS, hasExpiredTemporaryPassword, userStatus } from './user-s
       <span class="hint">Temporary password expired</span>
     }
   `,
-  styles: `
-    .badge {
-      display: inline-block;
-      padding: 0 0.5em;
-      border: 1px solid currentColor;
-      border-radius: 0.75em;
-      font-size: 0.875em;
-    }
-    .badge-active {
-      color: #146c2e;
-    }
-    .badge-blocked {
-      color: #b3261e;
-    }
-    .badge-locked {
-      color: #8a5100;
-    }
-    .badge-pending {
-      color: #8a5100;
-    }
-    .hint {
-      margin-left: 0.5em;
-      font-size: 0.875em;
-      color: #8a5100;
-    }
-  `,
 })
 export class UserStatusBadgeComponent {
   // Decorator-based on purpose, here and in the other components of this feature: the root Vitest

@@ -153,21 +153,6 @@ const PROTECTED_NOTE = 'The permanent ADMIN account is protected: it cannot be b
     <app-confirm-dialog />
     <app-temporary-password-dialog />
   `,
-  styles: `
-    dt {
-      font-weight: bold;
-    }
-    dd {
-      margin: 0 0 0.75em;
-    }
-    .actions {
-      display: flex;
-      gap: 0.5em;
-    }
-    .error {
-      color: #b3261e;
-    }
-  `,
 })
 export class UserDetailComponent {
   private readonly api = inject(AdminApi);

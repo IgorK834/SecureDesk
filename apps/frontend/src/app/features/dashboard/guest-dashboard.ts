@@ -11,16 +11,27 @@ import { loadTicketSummary } from './ticket-summary';
   imports: [RouterLink],
   template: `
     <h1>Guest dashboard</h1>
-    <p>Create tickets and follow the tickets you created.</p>
+    <p class="dashboard-intro">Create tickets and follow the tickets you created.</p>
     @if (summary(); as counts) {
-      <p>
-        You have created <strong>{{ counts.own }}</strong> ticket(s).
-      </p>
+      <dl>
+        <div>
+          <dt>You have created</dt>
+          <dd>{{ counts.own }}</dd>
+        </div>
+      </dl>
     } @else {
       <p role="status">Ticket count is unavailable.</p>
     }
-    <p><a routerLink="/tickets/new">Create ticket</a></p>
-    <p><a routerLink="/tickets">View your tickets</a></p>
+    <div class="dashboard-actions">
+      <a class="card" routerLink="/tickets/new">
+        <strong>Create ticket</strong>
+        <span>Describe a new issue for the helpdesk.</span>
+      </a>
+      <a class="card" routerLink="/tickets">
+        <strong>View your tickets</strong>
+        <span>Follow the status of requests you created.</span>
+      </a>
+    </div>
   `,
 })
 export class GuestDashboard {

@@ -23,10 +23,17 @@ type ListState =
   selector: 'app-ticket-list',
   imports: [DatePipe, RouterLink, Forbidden],
   template: `
-    <h1>Tickets</h1>
-    @if (auth.has('tickets:create')) {
-      <p><a routerLink="/tickets/new">Create ticket</a></p>
-    }
+    <div class="page-heading">
+      <div>
+        <h1>Tickets</h1>
+        <p>Tickets available to your account.</p>
+      </div>
+      @if (auth.has('tickets:create')) {
+        <a class="button button-primary" routerLink="/tickets/new"
+          >Create ticket <span aria-hidden="true">↗</span></a
+        >
+      }
+    </div>
 
     @let current = state();
     @switch (current.kind) {
@@ -60,7 +67,16 @@ type ListState =
                   <td>
                     <a [routerLink]="['/tickets', ticket.id]">{{ ticket.title }}</a>
                   </td>
-                  <td>{{ statusLabels[ticket.status] }}</td>
+                  <td>
+                    <span
+                      class="badge"
+                      [class.open]="ticket.status === 'OPEN'"
+                      [class.info]="ticket.status === 'IN_PROGRESS'"
+                      [class.acknowledged]="ticket.status === 'RESOLVED'"
+                    >
+                      {{ statusLabels[ticket.status] }}
+                    </span>
+                  </td>
                   <td>{{ ticket.createdAt | date: 'medium' }}</td>
                 </tr>
               }
@@ -85,31 +101,6 @@ type ListState =
           <p role="status">No tickets are available.</p>
         }
       }
-    }
-  `,
-  styles: `
-    table {
-      border-collapse: collapse;
-      width: 100%;
-    }
-    th,
-    td {
-      padding: 0.5rem;
-      text-align: left;
-      border-bottom: 1px solid #ccc;
-    }
-    nav {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      margin-block: 1rem;
-    }
-    .visually-hidden {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
     }
   `,
 })
