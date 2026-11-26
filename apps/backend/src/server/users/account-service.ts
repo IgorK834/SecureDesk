@@ -1,11 +1,12 @@
 import { and, eq, isNull } from 'drizzle-orm';
+import { systemAudit, type AuditContext } from '../audit/context';
 import { rememberPasswordHash } from '../auth/password-service';
 import { revokeAllForUser } from '../auth/session-service';
 import { applyTemporaryCredential, issueTemporaryCredential } from '../auth/temporary-password';
 import type { AppDb, AppTransaction } from '../db/connection';
 import { ADMIN_LOGIN } from '../db/seeds/users';
 import { users } from '../db/schema';
-import { ApiError, NotFoundError } from '../http/errors';
+import { ApiError, NotFoundError, UnauthorizedError } from '../http/errors';
 import { clearAccount } from '../security/attempt-tracker';
 import { recordSecurityEvent } from '../security/events';
 import { clock } from '../time/clock';
@@ -41,6 +42,10 @@ const ACCOUNT = {
   id: users.id,
   loginNormalized: users.loginNormalized,
   deletedAt: users.deletedAt,
+  isBlocked: users.isBlocked,
+  firstName: users.firstName,
+  lastName: users.lastName,
+  roleId: users.roleId,
 };
 
 /** The account, deleted or not; "not found" only when there is no such row at all. */
@@ -61,21 +66,58 @@ export function findLiveAccount(tx: Pick<AppTransaction, 'select'>, id: string) 
   return account;
 }
 
+function withProtectedAccountAudit<T>(
+  db: AppDb,
+  audit: AuditContext,
+  action: 'USER_BLOCKED' | 'USER_DELETED',
+  mutate: () => T,
+): T {
+  try {
+    return mutate();
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'PROTECTED_ACCOUNT') {
+      audit.record(
+        db,
+        {
+          action,
+          outcome: 'FAILURE',
+          details: { reason: 'PROTECTED_ACCOUNT' },
+          subject: { subjectLogin: PROTECTED_LOGIN },
+        },
+        'refusal',
+      );
+    }
+    throw error;
+  }
+}
+
 /**
  * Blocks the account and ends all of its sessions at once, so it loses access on its very next
  * request rather than at the idle timeout. The protected account cannot be blocked.
  */
-export function blockUser(db: AppDb, id: string): AdminUserDto {
-  return db.transaction(
-    (tx) => {
-      const account = findLiveAccount(tx, id);
-      assertNotProtectedAccount(account);
+export function blockUser(
+  db: AppDb,
+  id: string,
+  audit: AuditContext = systemAudit(),
+): AdminUserDto {
+  return withProtectedAccountAudit(db, audit, 'USER_BLOCKED', () =>
+    db.transaction(
+      (tx) => {
+        const account = findLiveAccount(tx, id);
+        assertNotProtectedAccount(account);
 
-      tx.update(users).set({ isBlocked: true }).where(eq(users.id, id)).run();
-      revokeAllForUser(tx, id);
-      return getUser(tx, id);
-    },
-    { behavior: 'immediate' },
+        tx.update(users).set({ isBlocked: true }).where(eq(users.id, id)).run();
+        revokeAllForUser(tx, id);
+        audit.record(tx, {
+          action: 'USER_BLOCKED',
+          outcome: 'SUCCESS',
+          details: {},
+          subject: { subjectLogin: account.loginNormalized },
+        });
+        return getUser(tx, id);
+      },
+      { behavior: 'immediate' },
+    ),
   );
 }
 
@@ -83,12 +125,22 @@ export function blockUser(db: AppDb, id: string): AdminUserDto {
  * Lets the account sign in again, and nothing more: sessions revoked by the block stay revoked,
  * and the password state (hash, forced change, expiry) is exactly as it was.
  */
-export function unblockUser(db: AppDb, id: string): AdminUserDto {
+export function unblockUser(
+  db: AppDb,
+  id: string,
+  audit: AuditContext = systemAudit(),
+): AdminUserDto {
   return db.transaction(
     (tx) => {
-      findLiveAccount(tx, id);
+      const account = findLiveAccount(tx, id);
 
       tx.update(users).set({ isBlocked: false }).where(eq(users.id, id)).run();
+      audit.record(tx, {
+        action: 'USER_UNBLOCKED',
+        outcome: 'SUCCESS',
+        details: {},
+        subject: { subjectLogin: account.loginNormalized },
+      });
       return getUser(tx, id);
     },
     { behavior: 'immediate' },
@@ -100,12 +152,19 @@ export function unlockUserLogin(
   db: AppDb,
   id: string,
   actor: { adminId: string; requestId: string },
+  audit: AuditContext,
 ): AdminUserDto {
   const now = clock.now();
   const result = db.transaction(
     (tx) => {
       const account = findLiveAccount(tx, id);
       clearAccount(tx, account.loginNormalized, now);
+      audit.record(tx, {
+        action: 'USER_UNLOCKED',
+        outcome: 'SUCCESS',
+        details: {},
+        subject: { subjectLogin: account.loginNormalized },
+      });
       return getUser(tx, id);
     },
     { behavior: 'immediate' },
@@ -124,16 +183,56 @@ export function unlockUserLogin(
  * so tickets, history and sessions keep a valid owner. Deleting twice is not an error and keeps
  * the time of the first deletion. The protected account cannot be deleted.
  */
-export function softDeleteUser(db: AppDb, id: string): void {
+export function softDeleteUser(db: AppDb, id: string, audit: AuditContext = systemAudit()): void {
+  withProtectedAccountAudit(db, audit, 'USER_DELETED', () =>
+    db.transaction(
+      (tx) => {
+        const account = findAccount(tx, id);
+        assertNotProtectedAccount(account);
+
+        if (!account.deletedAt) {
+          tx.update(users).set({ deletedAt: clock.now() }).where(eq(users.id, id)).run();
+        }
+        revokeAllForUser(tx, id);
+        audit.record(tx, {
+          action: 'USER_DELETED',
+          outcome: 'SUCCESS',
+          details: {},
+          subject: { subjectLogin: account.loginNormalized },
+        });
+      },
+      { behavior: 'immediate' },
+    ),
+  );
+}
+
+/** Administrator recovery after an out-of-band identity check. Revokes every active session. */
+export function resetTotpForUser(
+  db: AppDb,
+  userId: string,
+  audit: AuditContext = systemAudit(),
+): void {
   db.transaction(
     (tx) => {
-      const account = findAccount(tx, id);
-      assertNotProtectedAccount(account);
+      const account = tx.select(ACCOUNT).from(users).where(eq(users.id, userId)).get();
+      if (!account || account.deletedAt || account.isBlocked) throw new UnauthorizedError();
 
-      if (!account.deletedAt) {
-        tx.update(users).set({ deletedAt: clock.now() }).where(eq(users.id, id)).run();
-      }
-      revokeAllForUser(tx, id);
+      tx.update(users)
+        .set({
+          totpSecretEncrypted: null,
+          totpEnabledAt: null,
+          totpLastUsedStep: null,
+          updatedAt: clock.now(),
+        })
+        .where(eq(users.id, userId))
+        .run();
+      revokeAllForUser(tx, userId);
+      audit.record(tx, {
+        action: 'USER_TOTP_RESET',
+        outcome: 'SUCCESS',
+        details: {},
+        subject: { subjectLogin: account.loginNormalized },
+      });
     },
     { behavior: 'immediate' },
   );
@@ -159,24 +258,51 @@ export interface PasswordReset {
  * better-sqlite3 transaction is not (the order `createUser` uses). The 12 hours therefore start
  * at the call, and a reset of a missing account costs one hash it then discards.
  */
-export async function resetPassword(db: AppDb, id: string): Promise<PasswordReset> {
+export async function resetPassword(
+  db: AppDb,
+  id: string,
+  audit: AuditContext = systemAudit(),
+): Promise<PasswordReset> {
   const credential = await issueTemporaryCredential(clock);
 
-  db.transaction(
+  const reset = db.transaction(
     (tx) => {
       const account = tx
-        .select({ passwordHash: users.passwordHash, mustChangePassword: users.mustChangePassword })
+        .select({
+          loginNormalized: users.loginNormalized,
+          passwordHash: users.passwordHash,
+          mustChangePassword: users.mustChangePassword,
+        })
         .from(users)
         .where(and(eq(users.id, id), isNull(users.deletedAt)))
         .get();
-      if (!account) throw new NotFoundError();
+      if (!account) {
+        audit.record(
+          tx,
+          {
+            action: 'PASSWORD_RESET_BY_ADMIN',
+            outcome: 'FAILURE',
+            details: { reason: 'ACCOUNT_NOT_FOUND' },
+          },
+          'refusal',
+        );
+        return false;
+      }
 
       if (!account.mustChangePassword) rememberPasswordHash(tx, id, account.passwordHash);
       applyTemporaryCredential(tx, id, credential);
       revokeAllForUser(tx, id);
+      audit.record(tx, {
+        action: 'PASSWORD_RESET_BY_ADMIN',
+        outcome: 'SUCCESS',
+        details: {},
+        subject: { subjectLogin: account.loginNormalized },
+      });
+      return true;
     },
     { behavior: 'immediate' },
   );
+  if (!reset) throw new NotFoundError();
 
   return { value: credential.plaintext, expiresAt: credential.expiresAt };
 }
