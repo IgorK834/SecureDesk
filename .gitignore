@@ -17,6 +17,9 @@ next-env.d.ts
 data/
 *.sqlite*
 *.db
+head-anchor.json
+*.head-anchor.json
+security-alerts.jsonl
 
 # Local scratch space
 .local/
