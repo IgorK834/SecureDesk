@@ -24,7 +24,11 @@ interface AuditEvent {
 
 export interface AuditContext extends Readonly<AuditIdentity> {
   /** Required by default. Use 'refusal' only to preserve a refusal already decided. */
-  record(db: AppDb | AppTransaction, event: AuditEvent, policy?: 'refusal'): void;
+  record(
+    db: AppDb | AppTransaction,
+    event: AuditEvent,
+    policy?: 'refusal',
+  ): AuditLogRow | undefined;
 }
 
 function bindAudit(identity: AuditIdentity): AuditContext {
@@ -32,7 +36,7 @@ function bindAudit(identity: AuditIdentity): AuditContext {
     ...identity,
     record(db, { action, outcome, details, subject }, policy) {
       try {
-        appendAuditEntry(db, {
+        return appendAuditEntry(db, {
           ...identity,
           action,
           outcome,

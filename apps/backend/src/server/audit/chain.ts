@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { AuditLogRow } from '../db/schema/audit-log';
 
 export const GENESIS_HASH = '0'.repeat(64);
+export const AUDIT_HASH_PATTERN = /^[a-f0-9]{64}$/;
 
 export type AuditEntryContent = Omit<AuditLogRow, 'prevHash' | 'entryHash' | 'details'> & {
   details: string | null;

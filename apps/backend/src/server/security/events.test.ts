@@ -79,6 +79,7 @@ const ALL_TYPES = [
   'ACCOUNT_UNLOCKED_BY_ADMIN',
   'IP_BLOCK_CLEARED_BY_ADMIN',
   'SECURITY_SETTINGS_CHANGED',
+  'DETECTION_ALERT',
 ];
 
 describe('the event registry', () => {
@@ -89,7 +90,8 @@ describe('the event registry', () => {
   it.each(ALL_TYPES)('%s has a severity and a strict details schema', (type) => {
     const definition = SECURITY_EVENTS[type as SecurityEventType];
 
-    expect(SECURITY_EVENT_SEVERITIES).toContain(definition.severity);
+    if ('severity' in definition) expect(SECURITY_EVENT_SEVERITIES).toContain(definition.severity);
+    else expect(definition.details.shape.severity.options).toEqual([...SECURITY_EVENT_SEVERITIES]);
     expect(typeof definition.details.safeParse).toBe('function');
     // Strict: a key the schema does not declare is refused, whatever its name.
     const probe = definition.details.safeParse({ undeclaredKey: 1 });
@@ -98,7 +100,7 @@ describe('the event registry', () => {
 
   it('makes real honeytoken hits CRITICAL and the marked test event alerting', () => {
     const critical = Object.entries(SECURITY_EVENTS)
-      .filter(([, definition]) => definition.severity === 'CRITICAL')
+      .filter(([, definition]) => 'severity' in definition && definition.severity === 'CRITICAL')
       .map(([type]) => type);
     const alerting = Object.entries(SECURITY_EVENTS)
       .filter(([, definition]) => 'alert' in definition)
@@ -107,6 +109,7 @@ describe('the event registry', () => {
     expect(critical.sort()).toStrictEqual(['DECOY_RESOURCE_ACCESSED', 'HONEYTOKEN_TRIGGERED']);
     expect(alerting.sort()).toStrictEqual([
       'DECOY_RESOURCE_ACCESSED',
+      'DETECTION_ALERT',
       'HONEYTOKEN_TESTED',
       'HONEYTOKEN_TRIGGERED',
     ]);

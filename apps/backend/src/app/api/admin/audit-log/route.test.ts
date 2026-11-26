@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiClient } from '../../../../../../../tests/helpers/api-client';
 import { FakeClock } from '../../../../../../../tests/helpers/fake-clock';
 import { appendAuditEntry } from '../../../../server/audit/append';
+import { verifyAuditChain } from '../../../../server/audit/verify';
 import { seedWorld, signInAs } from '../../../../server/db/__fixtures__/seeded-world';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
 import { rejectAuditInserts } from '../../../../server/db/__fixtures__/test-db';
@@ -11,7 +12,9 @@ import { db } from '../../../../server/db/client';
 import { auditLog } from '../../../../server/db/schema';
 import * as detail from './[seq]/route';
 import * as exportRoute from './export/route';
+import * as integrity from './integrity/route';
 import * as list from './route';
+import * as verify from './verify/route';
 
 const URL = '/api/admin/audit-log';
 const NOW = new Date('2026-11-26T09:15:00.000Z');
@@ -70,6 +73,92 @@ function append(input: RowInput = {}, offsetMs = -5_000) {
 
 const good = { action: 'AUTH_LOGIN_SUCCESS', outcome: 'SUCCESS', details: {} } as const;
 const filter = (query: Record<string, string>) => URL + '?' + new URLSearchParams(query).toString();
+
+describe('audit log verification API', () => {
+  const verifyUrl = URL + '/verify';
+  const integrityUrl = URL + '/integrity';
+
+  it('SEC-81 SEC-82 verifies the pre-append head and persists the successful result', async () => {
+    const client = admin();
+    expect(await (await client.get(integrity, integrityUrl)).json()).toEqual({
+      verification: null,
+    });
+    const row = append();
+    const response = await client.post(verify, verifyUrl);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const summary = {
+      status: 'INTACT',
+      checkedEntries: 1,
+      warnings: ['ANCHOR_MISSING'],
+      verifiedAt: NOW.toISOString(),
+    };
+    expect(await response.json()).toMatchObject({
+      ...summary,
+      headSeq: row.seq,
+      headHash: row.entryHash,
+    });
+    const [recorded] = rowsFor('AUDIT_LOG_VERIFIED');
+    expect(recorded).toMatchObject({
+      seq: row.seq + 1,
+      outcome: 'SUCCESS',
+      actorUserId: ids.ADMIN,
+      occurredAt: NOW.toISOString(),
+    });
+    expect(JSON.parse(recorded!.details)).toEqual({
+      checkedEntries: 1,
+      warnings: ['ANCHOR_MISSING'],
+    });
+    expect(await (await client.get(integrity, integrityUrl)).json()).toEqual({
+      verification: summary,
+    });
+  });
+
+  it('SEC-83 reports and preserves the newest tampered verification', async () => {
+    const client = admin();
+    const row = append();
+    await client.post(verify, verifyUrl);
+    db.$client.exec('DROP TRIGGER audit_log_no_update');
+    db.$client
+      .prepare('UPDATE audit_log SET description = ? WHERE seq = ?')
+      .run('Modified', row.seq);
+    const response = await client.post(verify, verifyUrl);
+    expect(response.status).toBe(200);
+    const firstProblem = { seq: row.seq, id: row.id, kind: 'HASH_MISMATCH' };
+    const summary = {
+      status: 'TAMPERED',
+      checkedEntries: 2,
+      warnings: ['ANCHOR_MISSING'],
+      firstProblem,
+      verifiedAt: NOW.toISOString(),
+    };
+    expect(await response.json()).toMatchObject({ ...summary, problems: [firstProblem] });
+    const recorded = rowsFor('AUDIT_LOG_VERIFIED');
+    expect(recorded.map((entry) => entry.outcome)).toEqual(['SUCCESS', 'FAILURE']);
+    expect(JSON.parse(recorded[1]!.details)).toMatchObject({ checkedEntries: 2, firstProblem });
+    expect(await (await client.get(integrity, integrityUrl)).json()).toEqual({
+      verification: summary,
+    });
+  });
+
+  it('requires CSRF and refuses a concurrent request or a failed audit write', async () => {
+    const client = admin();
+    const forged = await client.post(verify, verifyUrl, { headers: { 'x-xsrf-token': 'wrong' } });
+    expect(forged.status).toBe(403);
+    for (let i = 0; i < 3; i++) append();
+    const running = verifyAuditChain(db, { batchSize: 1 });
+    const conflict = await client.post(verify, verifyUrl);
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ error: { code: 'VERIFICATION_IN_PROGRESS' } });
+    await running;
+
+    rejectAuditInserts(db);
+    const failure = await client.post(verify, verifyUrl);
+    expect(failure.status).toBe(500);
+    expect(await failure.json()).toMatchObject({ error: { code: 'AUDIT_UNAVAILABLE' } });
+    expect(rowsFor('AUDIT_LOG_VERIFIED')).toEqual([]);
+  });
+});
 
 describe('audit log read API', () => {
   it('SEC-79 combines user, UTC range, multiple actions and outcome with deterministic paging', async () => {

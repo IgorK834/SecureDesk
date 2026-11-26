@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, gte, isNull, lt } from 'drizzle-orm';
 import { z } from 'zod';
-import type { AppDb } from '../db/connection';
+import type { AppDb, AppTransaction } from '../db/connection';
 import { type SecurityEventSeverity, securityEvents } from '../db/schema';
+import { detectionAlertDetails, type DetectionAlertDetails } from '../detection/details';
 import { purgeIfDue } from '../maintenance/purge';
 import { clock } from '../time/clock';
 import { type SecurityEventRecord, dispatchAlerts, listAlertDispatchers } from './alerts';
@@ -17,7 +18,7 @@ const count = z.number().int().min(1);
 const shortText = z.string().min(1).max(100);
 
 /**
- * The security event types: each has a fixed severity and a strict schema for `details`, so the
+ * The security event types: each has a severity and a strict schema for `details`, so the
  * audit trail has a known shape and nothing but the listed, harmless fields can enter it.
  *
  *  - `aggregated`: noisy types, recorded with `recordAggregated` (one row per type, address and
@@ -109,10 +110,14 @@ export const SECURITY_EVENTS = {
         .min(1),
     }),
   },
+  DETECTION_ALERT: {
+    alert: true,
+    details: detectionAlertDetails,
+  },
 } as const satisfies Record<
   string,
   {
-    severity: SecurityEventSeverity;
+    severity?: SecurityEventSeverity;
     details: z.ZodType;
     aggregated?: true;
     alert?: true;
@@ -213,10 +218,11 @@ function newRow(
 ) {
   const definition = SECURITY_EVENTS[input.type];
   const dispatchable = 'alert' in definition && listAlertDispatchers().length > 0;
+  const detection = input.type === 'DETECTION_ALERT' ? (details as DetectionAlertDetails) : null;
   return {
-    id: randomUUID(),
+    id: detection?.alertId ?? randomUUID(),
     type: input.type,
-    severity: definition.severity,
+    severity: 'severity' in definition ? definition.severity : detection!.severity,
     occurredAt: clock.now(),
     ipKey: input.ipKey ?? null,
     userAgent: input.userAgent ? input.userAgent.slice(0, MAX_USER_AGENT_LENGTH) : null,
@@ -256,13 +262,19 @@ function afterInsert(db: AppDb, row: ReturnType<typeof newRow>, details: Record<
  * background: see `dispatchAlerts`.
  */
 export function recordSecurityEvent(db: AppDb, input: SecurityEventInput): string | undefined {
+  const event = stageSecurityEvent(db, input);
+  event?.afterCommit(db);
+  return event?.id;
+}
+
+/** Allows the event and its audit row to share a transaction. Dispatch only after commit. */
+export function stageSecurityEvent(db: AppDb | AppTransaction, input: SecurityEventInput) {
   const details = validated(input.type, input.details);
   if (!details) return undefined;
 
   const row = newRow(input, details);
   db.insert(securityEvents).values(row).run();
-  afterInsert(db, row, details);
-  return row.id;
+  return { id: row.id, afterCommit: (connection: AppDb) => afterInsert(connection, row, details) };
 }
 
 /**

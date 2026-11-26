@@ -62,6 +62,7 @@ export default defineConfig({
       provider: 'v8',
       include: [
         'apps/backend/src/**/*.ts',
+        'apps/backend/scripts/audit-tamper-demo/demo.ts',
         'apps/frontend/src/app/**/*.ts',
         'scripts/bot-sim/{guards,request-budget,report,runner}.ts',
       ],

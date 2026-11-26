@@ -1,9 +1,15 @@
 import { z } from 'zod';
 import { PASSWORD_VIOLATIONS } from '../auth/password-policy';
-import { SECURITY_EVENT_SEVERITIES, type AuditLogRow } from '../db/schema';
+import type { AuditLogRow } from '../db/schema';
+import { detectionAlertDetails } from '../detection/details';
 import { ROLES } from '../permissions/codes';
 import { SecuritySettingsPatch } from '../security/schemas';
 import { sanitizeForLog } from './sanitize';
+import {
+  integrityProblem,
+  intactVerificationDetails,
+  tamperedVerificationDetails,
+} from './verification-types';
 
 const empty = z.strictObject({});
 const count = z.int().nonnegative();
@@ -32,17 +38,6 @@ const settingChange = z
     [from, to].every((value) => SecuritySettingsPatch.safeParse({ [key]: value }).success),
   );
 
-const integrityProblem = {
-  kind: z.enum([
-    'HASH_MISMATCH',
-    'CHAIN_BROKEN',
-    'SEQUENCE_GAP',
-    'GENESIS_MISMATCH',
-    'MALFORMED_ROW',
-    'HEAD_MISMATCH',
-  ]),
-  seq: seq.nullable(),
-};
 const protectedAccount = z.strictObject({ reason: z.literal('PROTECTED_ACCOUNT') });
 
 function event(description: string, details: z.ZodType = empty) {
@@ -206,34 +201,16 @@ export const AUDIT_ACTIONS = {
     ),
   },
   AUDIT_LOG_VERIFIED: {
-    SUCCESS: event('Audit log integrity verified.', z.strictObject({ checkedEntries: count })),
-    FAILURE: event(
-      'Audit log integrity verification failed.',
-      z.strictObject({
-        checkedEntries: count,
-        reason: integrityProblem.kind,
-        seq: integrityProblem.seq,
-      }),
-    ),
+    SUCCESS: event('Audit log integrity verified.', intactVerificationDetails),
+    FAILURE: event('Audit log integrity verification failed.', tamperedVerificationDetails),
   },
   ALERT_RAISED: {
-    SUCCESS: event(
-      'Security alert raised.',
-      z.strictObject({
-        alertId: z.uuid(),
-        ruleId: auditText(64),
-        severity: z.enum(SECURITY_EVENT_SEVERITIES),
-        failures: count.optional(),
-      }),
-    ),
+    SUCCESS: event('Security alert raised.', detectionAlertDetails),
   },
   AUDIT_TAMPER_DETECTED: {
     FAILURE: event(
       'Audit log tampering detected.',
-      z.strictObject({
-        reason: integrityProblem.kind,
-        seq: integrityProblem.seq,
-      }),
+      z.strictObject({ firstProblem: integrityProblem }),
     ),
   },
 } satisfies Record<string, Partial<Record<AuditLogRow['outcome'], ReturnType<typeof event>>>>;
