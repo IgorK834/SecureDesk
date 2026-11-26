@@ -16,5 +16,5 @@ export const POST = defineRoute({
   name: 'admin.users.unblock',
   auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_BLOCK },
   params: UserParams,
-  handler: ({ params }) => noStoreJson(unblockUser(db, params.id)),
+  handler: ({ params, audit }) => noStoreJson(unblockUser(db, params.id, audit)),
 });

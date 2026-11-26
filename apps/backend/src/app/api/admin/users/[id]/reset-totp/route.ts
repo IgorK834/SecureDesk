@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { resetTotpForUser } from '../../../../../../server/auth/totp-service';
+import { resetTotpForUser } from '../../../../../../server/users/account-service';
 import { db } from '../../../../../../server/db/client';
 import { defineRoute } from '../../../../../../server/http/route-handler';
 import { PERMISSIONS } from '../../../../../../server/permissions/codes';
@@ -13,8 +13,8 @@ export const POST = defineRoute({
   auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_RESET_TOTP },
   params: UserParams,
   body: z.object({}).strict(),
-  handler: ({ params }) => {
-    resetTotpForUser(db, params.id);
+  handler: ({ params, audit }) => {
+    resetTotpForUser(db, params.id, audit);
     return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
   },
 });

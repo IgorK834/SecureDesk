@@ -30,7 +30,7 @@ export const PATCH = defineRoute({
   auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_UPDATE },
   params: UserParams,
   body: UpdateUserBody,
-  handler: ({ params, body }) => noStoreJson(updateUser(db, params.id, body)),
+  handler: ({ params, body, audit }) => noStoreJson(updateUser(db, params.id, body, audit)),
 });
 
 /**
@@ -41,8 +41,8 @@ export const DELETE = defineRoute({
   name: 'admin.users.delete',
   auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_DELETE },
   params: UserParams,
-  handler: ({ params }) => {
-    softDeleteUser(db, params.id);
+  handler: ({ params, audit }) => {
+    softDeleteUser(db, params.id, audit);
     return new NextResponse(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
   },
 });
