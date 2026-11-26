@@ -26,6 +26,7 @@ describe('MainNav', () => {
       '/admin/security',
       '/admin/ip-blocks',
       '/admin/security-events',
+      '/admin/audit-log',
     ]);
     expect(links.filter((href) => href.startsWith('/tickets'))).toStrictEqual([]);
   });

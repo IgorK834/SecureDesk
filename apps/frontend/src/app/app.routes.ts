@@ -112,6 +112,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'admin/audit-log',
+    title: 'Audit log',
+    ...requires('audit-log:read'),
+    loadComponent: () =>
+      import('./features/admin-audit-log/audit-log.component').then((m) => m.AuditLogComponent),
+  },
+  {
     path: 'tickets',
     title: 'Tickets',
     ...requires(READ_TICKETS),

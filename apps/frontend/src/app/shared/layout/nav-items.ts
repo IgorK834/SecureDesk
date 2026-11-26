@@ -16,6 +16,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { label: 'Security settings', route: '/admin/security', permission: 'security-settings:read' },
   { label: 'Address blocks', route: '/admin/ip-blocks', permission: 'ip-blocks:read' },
   { label: 'Security events', route: '/admin/security-events', permission: 'security-events:read' },
+  { label: 'Audit log', route: '/admin/audit-log', permission: 'audit-log:read' },
   { label: 'Tickets', route: '/tickets', permission: READ_TICKETS },
   { label: 'New ticket', route: '/tickets/new', permission: 'tickets:create' },
 ];

@@ -142,6 +142,7 @@ describe('role-specific pages (Angular guards, UX only)', () => {
     '/admin/security',
     '/admin/ip-blocks',
     '/admin/security-events',
+    '/admin/audit-log',
   ];
   const TICKET_URLS = ['/tickets', '/tickets/new', '/tickets/42'];
 
