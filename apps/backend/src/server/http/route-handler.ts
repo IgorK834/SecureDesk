@@ -1,15 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import type { z } from 'zod';
-import { requireStage } from '../auth/guards';
-import { type ResolvedSession, touchSession } from '../auth/session-service';
+import { requestAudit, type AuditContext } from '../audit/context';
+import { readSessionToken } from '../auth/cookie';
+import { requireResolvedStage } from '../auth/guards';
+import { type ResolvedSession, resolveSession, touchSession } from '../auth/session-service';
 import { db } from '../db/client';
 import { ConflictError as DbConflictError } from '../db/errors';
 import type { AuthStage } from '../db/schema';
 import type { PermissionCode } from '../permissions/codes';
+import { resolveClientIp, type ClientIp } from '../security/client-ip';
 import { logEvent } from '../security/log-event';
 import { assertCsrfProtection } from '../security/csrf';
-import { ApiError, ConflictError, ValidationError, errorResponse } from './errors';
+import {
+  ApiError,
+  ConflictError,
+  ForbiddenError,
+  ObjectAccessDeniedError,
+  ValidationError,
+  errorResponse,
+} from './errors';
 import { checkBodyHeaders, parseJsonBody } from './json-body';
 
 /**
@@ -41,6 +51,8 @@ export interface RouteContext<
 > {
   request: NextRequest;
   requestId: string;
+  clientIp: ClientIp;
+  audit: AuditContext;
   /** The signed-in session; `undefined` for a `'public'` route. */
   session: A extends 'public' ? undefined : ResolvedSession;
   query: Parsed<Q>;
@@ -116,6 +128,20 @@ function toResponse(name: string, requestId: string, error: unknown): Response {
   return errorResponse(500, 'INTERNAL_ERROR', 'Wystąpił błąd serwera');
 }
 
+function accessDenialReason(error: unknown) {
+  if (error instanceof ForbiddenError) return error.reason;
+  if (!(error instanceof ApiError)) return undefined;
+  switch (error.code) {
+    case 'AUTH_PASSWORD_CHANGE_REQUIRED':
+      return 'STAGE';
+    case 'AUTH_TOTP_REQUIRED':
+      return 'TOTP_REQUIRED';
+    case 'CSRF_ORIGIN_MISMATCH':
+    case 'CSRF_TOKEN_INVALID':
+      return 'CSRF';
+  }
+}
+
 /**
  * The one wrapper every API route handler is built with. In order:
  *
@@ -142,13 +168,23 @@ export function defineRoute<
 
   const route: DefinedRoute = async (request, segment) => {
     const requestId = randomUUID();
+    let audit: AuditContext | undefined;
     try {
       checkBodyHeaders(request, body !== undefined);
 
+      const clientIp = resolveClientIp(request.headers, process.env);
+      const resolved =
+        auth === 'public'
+          ? null
+          : resolveSession(db, readSessionToken(request), {
+              ip: clientIp.raw,
+              requestId,
+            });
+      audit = requestAudit(requestId, clientIp.raw, resolved?.user);
       const session =
         auth === 'public'
           ? undefined
-          : requireStage(request, auth.stages, { permission: auth.permission });
+          : requireResolvedStage(resolved, auth.stages, { permission: auth.permission });
 
       // A forged request must be refused before it can count as session activity.
       assertCsrfProtection(request, session?.session);
@@ -158,6 +194,8 @@ export function defineRoute<
       const context = {
         request,
         requestId,
+        clientIp,
+        audit,
         session,
         params: params && parseInput(params, await segment?.params),
         query: query && parseInput(query, Object.fromEntries(request.nextUrl.searchParams)),
@@ -166,6 +204,30 @@ export function defineRoute<
 
       return await handler(context);
     } catch (error) {
+      const reason = accessDenialReason(error);
+      if (audit?.actorType === 'USER') {
+        if (error instanceof ObjectAccessDeniedError) {
+          audit.record(
+            db,
+            {
+              action: 'OBJECT_ACCESS_DENIED',
+              outcome: 'FAILURE',
+              details: { reason: 'PERMISSION', resource: error.resource },
+            },
+            'refusal',
+          );
+        } else if (reason) {
+          audit.record(
+            db,
+            {
+              action: 'ACCESS_DENIED',
+              outcome: 'FAILURE',
+              details: { reason, route: name },
+            },
+            'refusal',
+          );
+        }
+      }
       return toResponse(name, requestId, error);
     }
   };

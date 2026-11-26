@@ -78,6 +78,16 @@ export class CaptchaUnavailableError extends ApiError {
   }
 }
 
+export function isCaptchaRefusal(
+  error: unknown,
+): error is ApiError & { code: 'CAPTCHA_REQUIRED' | 'CAPTCHA_FAILED' | 'CAPTCHA_UNAVAILABLE' } {
+  return (
+    error instanceof CaptchaRequiredError ||
+    error instanceof CaptchaFailedError ||
+    error instanceof CaptchaUnavailableError
+  );
+}
+
 /** 401: no valid session. The same answer whatever the reason, so it reveals nothing about it. */
 export class UnauthorizedError extends ApiError {
   constructor() {
@@ -87,8 +97,19 @@ export class UnauthorizedError extends ApiError {
 
 /** 403: signed in, but the role or the object does not allow this. */
 export class ForbiddenError extends ApiError {
-  constructor() {
+  constructor(readonly reason: 'PERMISSION' | 'STAGE' = 'PERMISSION') {
     super(403, 'AUTH_FORBIDDEN', 'Brak uprawnień');
+  }
+}
+
+/** 500: a required audit entry could not be committed. */
+export class AuditUnavailableError extends ApiError {
+  constructor() {
+    super(
+      500,
+      'AUDIT_UNAVAILABLE',
+      'Nie można zapisać zdarzenia w dzienniku. Operacja została przerwana',
+    );
   }
 }
 
@@ -127,6 +148,13 @@ export class ConflictError extends ApiError {
 export class NotFoundError extends ApiError {
   constructor() {
     super(404, 'NOT_FOUND', 'Nie znaleziono zasobu');
+  }
+}
+
+/** An existing object is concealed by policy. Its public response stays the standard 404. */
+export class ObjectAccessDeniedError extends NotFoundError {
+  constructor(readonly resource: 'TICKET') {
+    super();
   }
 }
 
