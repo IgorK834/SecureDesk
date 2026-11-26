@@ -91,6 +91,10 @@ function sampleTicket() {
 }
 
 const AUDIT_COVERAGE: Readonly<Record<string, CoverageDecision>> = {
+  'admin.audit_log.export': {
+    actions: ['AUDIT_LOG_EXPORTED'],
+    sample: () => admin({ json: { format: 'jsonl' } }),
+  },
   'admin.security_settings.update': {
     actions: ['SETTINGS_CHANGED'],
     sample: () => admin({ json: { sessionIdleTimeoutMinutes: 20 } }),
@@ -331,6 +335,7 @@ describe('mutating route audit coverage', () => {
           options,
         );
         expect(response.ok, 'sample returned HTTP ' + response.status).toBe(true);
+        await response.arrayBuffer();
         const appended = db.select().from(auditLog).where(gt(auditLog.seq, before)).all();
         if (decision.actions) {
           expect(appended.map(({ action }) => action)).toEqual(

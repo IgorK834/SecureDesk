@@ -2,7 +2,8 @@ import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 const root = path.resolve(import.meta.dirname);
-const databasePath = path.join(root, 'data', 'securedesk.e2e.sqlite');
+const isolatedRun = process.env.SECUREDESK_E2E_DIR;
+const databasePath = path.resolve(isolatedRun ?? path.join(root, 'data'), 'securedesk.e2e.sqlite');
 const commonEnv = {
   ...process.env,
   APP_ORIGIN: 'http://localhost:4200',
@@ -27,13 +28,24 @@ const commonEnv = {
 export default defineConfig({
   testDir: './tests/e2e',
   globalSetup: './tests/e2e/global-setup.ts',
-  outputDir: './.local/playwright',
+  outputDir: isolatedRun ? path.join(isolatedRun, 'playwright') : './.local/playwright',
   fullyParallel: false,
   workers: 1,
   retries: 0,
   timeout: 90_000,
   expect: { timeout: 10_000 },
-  reporter: [['list'], ['html', { outputFolder: '.local/playwright-report', open: 'never' }]],
+  reporter: [
+    ['list'],
+    [
+      'html',
+      {
+        outputFolder: isolatedRun
+          ? path.join(isolatedRun, 'playwright-report')
+          : '.local/playwright-report',
+        open: 'never',
+      },
+    ],
+  ],
   use: {
     baseURL: 'http://localhost:4200',
     trace: 'retain-on-failure',

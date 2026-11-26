@@ -841,6 +841,22 @@ policy violation, the fixed violation codes. Administrator resets use `PASSWORD_
 A single account edit can write both `USER_UPDATED` with field names and `USER_ROLE_CHANGED`
 with role IDs. Both entries commit with the edit.
 
+### Audit browser and export
+
+`GET /api/admin/audit-log` accepts user, outcome, inclusive UTC bounds and comma-separated
+`action` codes. It returns pages newest first by sequence. The detail route uses the sequence
+number. Both routes share a rolling five-minute view limit per session, tracked using a digest of
+the internal session ID. The audit entry contains neither the session ID nor its authentication token.
+
+`POST /api/admin/audit-log/export` accepts the same filters with action codes as a JSON array and
+a format of `csv` or `jsonl`. It counts the matches and commits the export entry before sending the
+file. The stream reads bounded batches in ascending sequence up to the recorded last sequence. The
+exported range excludes the entry that records that export. CSV escapes spreadsheet formulas, so
+use JSON Lines for byte-preserving verification. A full JSON Lines export carries the column names
+and canonical details text used by the verification snippet above. For a filtered export, recompute
+individual entries using their own `prev_hash`. Sequence gaps in a filtered file may reflect the
+filters.
+
 ## HTTP response hardening and deployment
 
 Next.js applies these headers to every `/api/**` response: `Cache-Control: no-store`,

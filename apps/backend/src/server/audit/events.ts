@@ -178,7 +178,12 @@ export const AUDIT_ACTIONS = {
       z.strictObject({ resource: z.literal('/api/backup/config') }),
     ),
   },
-  AUDIT_LOG_VIEWED: { SUCCESS: event('Audit log viewed.') },
+  AUDIT_LOG_VIEWED: {
+    SUCCESS: event(
+      'Audit log viewed.',
+      z.strictObject({ sessionRef: z.string().regex(/^[a-f0-9]{64}$/) }),
+    ),
+  },
   AUDIT_LOG_EXPORTED: {
     SUCCESS: event(
       'Audit log exported.',

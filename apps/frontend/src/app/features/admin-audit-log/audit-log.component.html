@@ -1,0 +1,157 @@
+<header class="heading">
+  <h1>Audit log</h1>
+  @if (auth.has('audit-log:export')) {
+    <div class="export-controls" aria-label="Export audit log">
+      <button type="button" [disabled]="exporting()" (click)="export('csv')">Export CSV</button>
+      <button type="button" [disabled]="exporting()" (click)="export('jsonl')">
+        Export JSON Lines
+      </button>
+    </div>
+  }
+</header>
+
+<ng-container #integrityPanel />
+
+<form class="filters" [formGroup]="form" (ngSubmit)="applyFilters()">
+  <label>
+    User
+    <input type="search" formControlName="user" maxlength="128" placeholder="Login or user ID" />
+  </label>
+  <div class="filter-field">
+    <label for="audit-action">Action</label>
+    <select id="audit-action" formControlName="action">
+      <option value="">All actions</option>
+      @for (action of actions(); track action) {
+        <option [value]="action">{{ action }}</option>
+      }
+    </select>
+  </div>
+  <div class="filter-field">
+    <label for="audit-outcome">Outcome</label>
+    <select id="audit-outcome" formControlName="outcome">
+      <option value="">All outcomes</option>
+      <option value="SUCCESS">Success</option>
+      <option value="FAILURE">Failure</option>
+    </select>
+  </div>
+  <label>
+    From (UTC)
+    <input type="datetime-local" formControlName="from" />
+  </label>
+  <label>
+    To (UTC)
+    <input type="datetime-local" formControlName="to" />
+  </label>
+  <button type="submit">Apply filters</button>
+</form>
+
+@if (filterError(); as message) {
+  <p class="error" role="alert">{{ message }}</p>
+}
+@if (exportError(); as message) {
+  <p class="error" role="alert">{{ message }}</p>
+}
+
+@switch (state()) {
+  @case ('loading') {
+    <p class="state" role="status">Loading audit entries…</p>
+  }
+  @case ('error') {
+    <div class="state" role="alert">
+      <p>Could not load audit entries.</p>
+      <button type="button" (click)="load()">Try again</button>
+    </div>
+  }
+  @case ('ready') {
+    @if (entries().length === 0) {
+      <p class="state" role="status">No audit entries match these filters.</p>
+    } @else {
+      <div class="table-region" role="region" aria-label="Audit entries" tabindex="0">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Sequence</th>
+              <th scope="col">Time (UTC)</th>
+              <th scope="col">Actor</th>
+              <th scope="col">Subject</th>
+              <th scope="col">IP address</th>
+              <th scope="col">Action</th>
+              <th scope="col">Description</th>
+              <th scope="col">Outcome</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (entry of entries(); track entry.seq) {
+              <tr>
+                <td>
+                  <button
+                    type="button"
+                    class="entry-link"
+                    (click)="openEntry(entry.seq, drawer)"
+                    [attr.aria-label]="'View entry ' + entry.seq"
+                  >
+                    #{{ entry.seq }}
+                  </button>
+                </td>
+                <td class="time">
+                  <time [attr.datetime]="entry.occurredAt">{{
+                    entry.occurredAt | date: 'yyyy-MM-dd HH:mm:ss.SSS' : 'UTC'
+                  }}</time>
+                </td>
+                <td>{{ entry.actor.login ?? entry.actor.type }}</td>
+                <td>{{ entry.subject.login ?? entry.subject.ref ?? '—' }}</td>
+                <td class="address">{{ entry.ip ?? '—' }}</td>
+                <td class="action">{{ entry.action }}</td>
+                <td class="description">{{ entry.description }}</td>
+                <td>
+                  <span class="badge" [class.failure]="entry.outcome === 'FAILURE'">{{
+                    entry.outcome === 'SUCCESS' ? 'Success' : 'Failure'
+                  }}</span>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+    @if (total() > 0) {
+      <nav class="pagination" aria-label="Audit log pages">
+        <span>{{ total() }} {{ total() === 1 ? 'entry' : 'entries' }} · Page {{ page() }}</span>
+        <div>
+          <button type="button" [disabled]="page() === 1" (click)="changePage(-1)">Previous</button>
+          <button type="button" [disabled]="page() * pageSize >= total()" (click)="changePage(1)">
+            Next
+          </button>
+        </div>
+      </nav>
+    }
+  }
+}
+
+<dialog #drawer (close)="clearDetail()" aria-labelledby="audit-entry-title">
+  <header class="drawer-header">
+    <h2 id="audit-entry-title">Audit entry{{ selected() ? ' #' + selected()?.seq : '' }}</h2>
+    <button type="button" autofocus (click)="drawer.close()">Close</button>
+  </header>
+  @if (selected(); as entry) {
+    <p>{{ entry.description }}</p>
+    <dl>
+      <dt>Action</dt>
+      <dd class="action">{{ entry.action }}</dd>
+      <dt>Time (UTC)</dt>
+      <dd class="time">{{ entry.occurredAt | date: 'yyyy-MM-dd HH:mm:ss.SSS' : 'UTC' }}</dd>
+      <dt>Request ID</dt>
+      <dd class="hash">{{ entry.requestId }}</dd>
+      <dt>Previous hash</dt>
+      <dd class="hash">{{ entry.prevHash }}</dd>
+      <dt>Entry hash</dt>
+      <dd class="hash">{{ entry.entryHash }}</dd>
+    </dl>
+    <h3>Details</h3>
+    <pre>{{ entry.details | json }}</pre>
+  } @else if (detailError()) {
+    <p class="error" role="alert">Could not load this audit entry.</p>
+  } @else {
+    <p role="status">Loading audit entry…</p>
+  }
+</dialog>

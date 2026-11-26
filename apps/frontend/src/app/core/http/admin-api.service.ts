@@ -1,4 +1,4 @@
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpParams, type HttpResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import type { Observable } from 'rxjs';
 import type { Role } from '../auth/auth.models';
@@ -64,6 +64,41 @@ export interface SecurityEventPage {
   page: number;
   pageSize: number;
   total: number;
+}
+
+export type AuditOutcome = 'SUCCESS' | 'FAILURE';
+export type AuditExportFormat = 'csv' | 'jsonl';
+
+export interface AuditFilters {
+  user?: string;
+  action?: string[];
+  outcome?: AuditOutcome;
+  from?: string;
+  to?: string;
+}
+
+export interface AuditEntry {
+  seq: number;
+  id: string;
+  occurredAt: string;
+  actor: { type: 'USER' | 'ANONYMOUS' | 'SYSTEM'; userId: string | null; login: string | null };
+  subject: { login: string | null; ref: string | null };
+  ip: string | null;
+  action: string;
+  description: string;
+  outcome: AuditOutcome;
+  details: Record<string, unknown>;
+  requestId: string;
+  prevHash: string;
+  entryHash: string;
+}
+
+export interface AuditPage {
+  items: AuditEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  actions: string[];
 }
 
 export interface HoneytokenStatus {
@@ -138,6 +173,7 @@ const SECURITY_SETTINGS_URL = '/api/admin/security-settings';
 const IP_BLOCKS_URL = '/api/admin/ip-blocks';
 const SECURITY_EVENTS_URL = '/api/admin/security-events';
 const HONEYTOKENS_URL = '/api/admin/honeytokens';
+const AUDIT_LOG_URL = '/api/admin/audit-log';
 const userUrl = (id: string) => `${USERS_URL}/${encodeURIComponent(id)}`;
 
 /**
@@ -228,6 +264,34 @@ export class AdminApi {
     return this.http.post<SecurityEvent>(
       `${SECURITY_EVENTS_URL}/${encodeURIComponent(id)}/acknowledge`,
       null,
+    );
+  }
+
+  listAuditEntries(filters: AuditFilters, page: number, pageSize: number): Observable<AuditPage> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    if (filters.user) params = params.set('user', filters.user);
+    if (filters.action?.length) params = params.set('action', filters.action.join(','));
+    if (filters.outcome) params = params.set('outcome', filters.outcome);
+    if (filters.from) params = params.set('from', filters.from);
+    if (filters.to) params = params.set('to', filters.to);
+    return this.http.get<AuditPage>(AUDIT_LOG_URL, { params });
+  }
+
+  getAuditEntry(seq: number): Observable<AuditEntry> {
+    return this.http.get<AuditEntry>(`${AUDIT_LOG_URL}/${seq}`);
+  }
+
+  exportAuditEntries(
+    filters: AuditFilters,
+    format: AuditExportFormat,
+  ): Observable<HttpResponse<Blob>> {
+    return this.http.post(
+      `${AUDIT_LOG_URL}/export`,
+      { ...filters, format },
+      {
+        responseType: 'blob',
+        observe: 'response',
+      },
     );
   }
 
