@@ -72,8 +72,9 @@ function newSession(userId: string, overrides: Partial<typeof sessions.$inferIns
 }
 
 describe('migrated schema', () => {
-  it('contains the seven core tables, the tickets table and the four Module 2 tables', () => {
+  it('contains the core, ticket, abuse-defence and audit tables', () => {
     expect(tableNames()).toEqual([
+      'audit_log',
       'captcha_challenges',
       'honeytokens',
       'login_attempts',
@@ -177,8 +178,9 @@ describe('the Drizzle schema in code matches the migrations', () => {
     // role_permissions -> roles, role_permissions -> permissions, users -> roles,
     // password_history -> users, sessions -> users, security_settings -> users,
     // tickets -> users (creator), tickets -> users (assignee), security_events -> users (subject),
-    // security_events -> users (acknowledged by), security_events -> honeytokens
-    expect(declared).toHaveLength(11);
+    // security_events -> users (acknowledged by), security_events -> honeytokens,
+    // audit_log -> users (actor)
+    expect(declared).toHaveLength(12);
   });
 });
 
@@ -212,6 +214,9 @@ describe('no plaintext credentials can be stored', () => {
     'security_events.ip_key',
     'security_events.honeytoken_id',
     'captcha_challenges.ip_key',
+    // Audit row digests describe chain integrity.
+    'audit_log.prev_hash',
+    'audit_log.entry_hash',
   ];
 
   it('limits credential-like columns to password_hash and token_hash plus non-secret metadata', () => {

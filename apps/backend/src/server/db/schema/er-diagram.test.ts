@@ -7,6 +7,7 @@ import type { AppDb } from '../connection';
 // The ER diagram in docs/database-schema.md is part of the report. This test makes it
 // executable: it fails when the diagram and the migrated database disagree.
 const DOC = path.resolve(__dirname, '../../../../../../docs/database-schema.md');
+const MERMAID = path.join(path.dirname(DOC), 'database-schema.mmd');
 
 interface DiagramColumn {
   type: string;
@@ -20,7 +21,9 @@ interface Diagram {
 }
 
 function parseDiagram(markdown: string): Diagram {
-  const block = /```mermaid\s+erDiagram\n([\s\S]*?)```/.exec(markdown)?.[1];
+  const block = markdown.startsWith('erDiagram\n')
+    ? markdown
+    : /```mermaid\s+erDiagram\n([\s\S]*?)```/.exec(markdown)?.[1];
   if (!block) throw new Error('no mermaid erDiagram block found in docs/database-schema.md');
 
   const entities: Diagram['entities'] = {};
@@ -181,6 +184,21 @@ const tables = () =>
   ).map((row) => row.name);
 
 describe('docs/database-schema.md ER diagram matches the migrations', () => {
+  it('uses the same columns, key markers and relationships in the standalone diagram', () => {
+    const shape = ({ entities, relations }: Diagram) => ({
+      entities: Object.fromEntries(
+        Object.entries(entities).map(([table, columns]) => [
+          table,
+          Object.fromEntries(
+            Object.entries(columns).map(([name, { type, keys }]) => [name, { type, keys }]),
+          ),
+        ]),
+      ),
+      relations: [...relations].sort(),
+    });
+    expect(shape(parseDiagram(readFileSync(MERMAID, 'utf8')))).toEqual(shape(diagram));
+  });
+
   it('describes exactly the migrated tables', () => {
     expect(Object.keys(diagram.entities).sort()).toEqual(tables().sort());
   });
@@ -295,6 +313,12 @@ describe('parseDiagram (guards the guard)', () => {
       'CHECK: OPEN, IN_PROGRESS, RESOLVED',
       'CHECK: OPEN, IN_PROGRESS, DONE',
       'tickets.status',
+    ],
+    [
+      'an audit hash length changed in the diagram only',
+      'TEXT prev_hash "CHECK length = 64"',
+      'TEXT prev_hash "CHECK length = 32"',
+      'audit_log.prev_hash',
     ],
     [
       'a minimum length changed in the diagram only',
