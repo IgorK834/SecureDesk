@@ -121,7 +121,15 @@ const EVENT_TYPES = [
                     <pre>{{ event.details | json }}</pre>
                   </td>
                   <td>{{ event.ipKey ?? '—' }}</td>
-                  <td>{{ event.acknowledgedAt ? 'Acknowledged' : 'Open' }}</td>
+                  <td>
+                    <span
+                      class="badge"
+                      [class.acknowledged]="event.acknowledgedAt"
+                      [class.open]="!event.acknowledgedAt"
+                    >
+                      {{ event.acknowledgedAt ? 'Acknowledged' : 'Open' }}
+                    </span>
+                  </td>
                   @if (auth.has('security-events:acknowledge')) {
                     <td>
                       @if (!event.acknowledgedAt) {
@@ -184,7 +192,15 @@ const EVENT_TYPES = [
                 <tr>
                   <td>{{ item.label }}</td>
                   <td>{{ item.kind }}</td>
-                  <td>{{ item.enabled ? 'Yes' : 'No' }}</td>
+                  <td>
+                    <span
+                      class="badge"
+                      [class.acknowledged]="item.enabled"
+                      [class.open]="!item.enabled"
+                    >
+                      {{ item.enabled ? 'Yes' : 'No' }}
+                    </span>
+                  </td>
                   <td>
                     {{ item.lastTriggeredAt ? (item.lastTriggeredAt | date: 'medium') : 'Never' }}
                   </td>
@@ -207,66 +223,6 @@ const EVENT_TYPES = [
         }
       }
     </section>
-  `,
-  styles: `
-    form {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: end;
-      gap: 0.75rem;
-      margin-block: 1rem;
-    }
-    label {
-      display: grid;
-      gap: 0.25rem;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    th,
-    td {
-      padding: 0.45rem;
-      border-bottom: 1px solid #ccc;
-      text-align: left;
-      vertical-align: top;
-    }
-    pre {
-      max-width: 32rem;
-      margin: 0.25rem 0 0;
-      white-space: pre-wrap;
-    }
-    .badge {
-      display: inline-block;
-      padding: 0.15rem 0.45rem;
-      border-radius: 0.75rem;
-      border: 1px solid currentColor;
-    }
-    .critical {
-      color: #a40000;
-      font-weight: 700;
-    }
-    .warning {
-      color: #855600;
-    }
-    .info {
-      color: #185a8d;
-    }
-    .pager {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    section {
-      margin-top: 2rem;
-    }
-    .visually-hidden {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
-    }
   `,
 })
 export class SecurityEventsComponent {

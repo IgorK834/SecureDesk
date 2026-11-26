@@ -3,7 +3,6 @@ import { db } from '../../../../server/db/client';
 import { AWS_DECOY_ID } from '../../../../server/db/seeds/honeytokens';
 import { defineRoute } from '../../../../server/http/route-handler';
 import { triggerHoneytoken } from '../../../../server/security/honeytokens';
-import { getClientIp } from '../../../../server/security/rate-limiter';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,13 +12,18 @@ const placeholder = 'DECOY_CREDENTIAL_NOT_CONFIGURED';
 export const GET = defineRoute({
   name: 'backup.config_decoy',
   auth: 'public',
-  handler: ({ request, requestId }) => {
+  handler: ({ request, requestId, audit, clientIp }) => {
+    audit.record(db, {
+      action: 'DECOY_RESOURCE_ACCESSED',
+      outcome: 'SUCCESS',
+      details: { resource: '/api/backup/config' },
+    });
     triggerHoneytoken({
       tokenId: AWS_DECOY_ID,
       source: 'AWS_KEYS',
       ctx: {
         db,
-        ipKey: getClientIp(request),
+        ipKey: clientIp.key,
         requestId,
         userAgent: request.headers.get('user-agent'),
       },

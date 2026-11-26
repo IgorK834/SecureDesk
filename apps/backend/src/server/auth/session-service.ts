@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, getTableColumns, isNull, ne } from 'drizzle-orm';
+import { systemAudit, type AuditContext } from '../audit/context';
 import type { AppDb } from '../db/connection';
 import { type AuthStage, rolePermissions, sessions, users } from '../db/schema';
 import { readSecuritySettings } from '../security/settings';
@@ -80,11 +81,14 @@ export function createSession(db: SessionDb, userId: string, authStage: AuthStag
 /**
  * Ends one session. Idempotent, and it keeps the first revocation time when called again.
  */
-export function revokeSession(db: SessionDb, sessionId: string): void {
-  db.update(sessions)
-    .set({ revokedAt: clock.now() })
-    .where(and(eq(sessions.id, sessionId), isNull(sessions.revokedAt)))
-    .run();
+export function revokeSession(db: SessionDb, sessionId: string): boolean {
+  return (
+    db
+      .update(sessions)
+      .set({ revokedAt: clock.now() })
+      .where(and(eq(sessions.id, sessionId), isNull(sessions.revokedAt)))
+      .run().changes > 0
+  );
 }
 
 /** Ends the session a raw token belongs to, if there is one. Unknown or malformed tokens are ignored. */
@@ -143,7 +147,11 @@ export function rotateSession(
  * found to be expired, or to belong to a blocked or deleted user, is revoked on the spot so it
  * cannot come back to life (for example when the user is unblocked or the idle timeout is raised).
  */
-export function resolveSession(db: SessionDb, token: string | undefined): ResolvedSession | null {
+export function resolveSession(
+  db: AppDb,
+  token: string | undefined,
+  context?: Pick<AuditContext, 'requestId' | 'ip'>,
+): ResolvedSession | null {
   // A malformed value cannot be a token we issued, so it never reaches the database.
   if (typeof token !== 'string' || !TOKEN_PATTERN.test(token)) return null;
 
@@ -169,13 +177,34 @@ export function resolveSession(db: SessionDb, token: string | undefined): Resolv
   // The idle timeout is read on every request so a change by an administrator applies at once.
   const idleLimitMs = readSecuritySettings(db).sessionIdleTimeoutMinutes * MINUTE_MS;
 
-  const unusable =
-    user.deletedAt !== null ||
-    user.isBlocked ||
-    nowMs >= session.expiresAt.getTime() ||
-    nowMs - session.lastActivityAt.getTime() >= idleLimitMs;
-  if (unusable) {
+  if (user.deletedAt !== null || user.isBlocked) {
     revokeSession(db, session.id);
+    return null;
+  }
+  const expiry =
+    nowMs >= session.expiresAt.getTime()
+      ? 'ABSOLUTE'
+      : nowMs - session.lastActivityAt.getTime() >= idleLimitMs
+        ? 'IDLE'
+        : null;
+  if (expiry) {
+    db.transaction(
+      (tx) => {
+        if (revokeSession(tx, session.id)) {
+          systemAudit(context?.requestId, context?.ip).record(
+            tx,
+            {
+              action: 'AUTH_SESSION_EXPIRED',
+              outcome: 'SUCCESS',
+              details: { kind: expiry },
+              subject: { subjectLogin: user.loginNormalized },
+            },
+            'refusal',
+          );
+        }
+      },
+      { behavior: 'immediate' },
+    );
     return null;
   }
 

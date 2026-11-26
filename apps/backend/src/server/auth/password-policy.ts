@@ -9,13 +9,15 @@ import { BANNED_PASSWORDS } from './banned-passwords';
 // passwords people choose. (Temporary passwords have their own composition, see
 // temporary-password.ts; that is a generator property, not a rule for user-chosen passwords.)
 
-export type PasswordViolation =
-  | 'TOO_SHORT'
-  | 'TOO_LONG'
-  | 'CONTAINS_LOGIN'
-  | 'CONTAINS_FIRST_NAME'
-  | 'CONTAINS_LAST_NAME'
-  | 'COMMON_PASSWORD';
+export const PASSWORD_VIOLATIONS = [
+  'TOO_SHORT',
+  'TOO_LONG',
+  'CONTAINS_LOGIN',
+  'CONTAINS_FIRST_NAME',
+  'CONTAINS_LAST_NAME',
+  'COMMON_PASSWORD',
+] as const;
+export type PasswordViolation = (typeof PASSWORD_VIOLATIONS)[number];
 
 /** The profile fields the personal-data rule compares against. */
 export interface PolicySubject {

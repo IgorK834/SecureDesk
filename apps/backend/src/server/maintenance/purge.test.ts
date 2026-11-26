@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeClock } from '../../../../../tests/helpers/fake-clock';
-import { createMigratedDb, insertUser } from '../db/__fixtures__/test-db';
+import { createMigratedDb, insertUser, rejectAuditInserts } from '../db/__fixtures__/test-db';
 import type { AppDb } from '../db/connection';
-import { captchaChallenges, loginAttempts, securityEvents, securitySettings } from '../db/schema';
+import {
+  auditLog,
+  captchaChallenges,
+  loginAttempts,
+  securityEvents,
+  securitySettings,
+} from '../db/schema';
 import { PURGE_INTERVAL_MS, purgeExpired, purgeIfDue } from './purge';
 
 const HOUR = 60 * 60 * 1000;
@@ -73,6 +79,25 @@ describe('purgeExpired', () => {
 
     expect(result.loginAttempts).toBe(1);
     expect(ids(loginAttempts)).toStrictEqual(['edge', 'now', 'recent']);
+    expect(db.select().from(auditLog).all()).toMatchObject([
+      {
+        action: 'RETENTION_PURGED',
+        actorType: 'SYSTEM',
+        actorUserId: null,
+        actorLogin: null,
+        ip: null,
+        details: '{"attemptsRemoved":1,"challengesRemoved":0,"eventsRemoved":0}',
+        requestId: expect.any(String),
+      },
+    ]);
+  });
+
+  it('rolls back retention deletions if the audit insert fails', () => {
+    attempt('old', ago(2 * DAY));
+    rejectAuditInserts(db);
+
+    expect(() => purgeExpired(db)).toThrow(expect.objectContaining({ code: 'AUDIT_UNAVAILABLE' }));
+    expect(ids(loginAttempts)).toEqual(['old']);
   });
 
   it('removes CAPTCHA challenges created more than 1 hour ago and keeps the rest', () => {

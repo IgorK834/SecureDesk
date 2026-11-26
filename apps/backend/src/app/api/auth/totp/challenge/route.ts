@@ -16,8 +16,8 @@ export const POST = defineRoute({
   name: 'auth.totp.challenge',
   auth: { stages: ['TOTP_CHALLENGE'] },
   body: Body,
-  handler: async ({ session, body }) => {
-    const created = await completeTotpChallenge(db, session.session, body.code);
+  handler: async ({ session, body, audit }) => {
+    const created = await completeTotpChallenge(db, session.session, body.code, audit);
     const response = NextResponse.json(
       { user: toProfile(session.user), authStage: 'FULLY_AUTHENTICATED' as const },
       { headers: { 'Cache-Control': 'no-store' } },

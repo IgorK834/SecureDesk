@@ -35,5 +35,5 @@ export const POST = defineRoute({
   name: 'admin.users.create',
   auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_CREATE },
   body: CreateUserBody,
-  handler: async ({ body }) => noStoreJson(await createUser(db, body), 201),
+  handler: async ({ body, audit }) => noStoreJson(await createUser(db, body, audit), 201),
 });

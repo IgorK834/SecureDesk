@@ -70,6 +70,20 @@ requires every listed identifier to occur in a real `describe`, `it` or `test` t
 | SEC-60 | Repeated current-password failures lock password change and revoke sessions.   |
 | SEC-61 | The bot simulator refuses an external target without two explicit consents.    |
 | SEC-62 | Production startup rejects dummy keys and every test-only CAPTCHA bypass.      |
+| SEC-63 | Each login outcome records its action, result, client address and UTC time.    |
+| SEC-64 | Authentication refusals store fixed reasons and keep the original responses.   |
+| SEC-65 | Failed credentials store a known login or a keyed reference for unknown input. |
+| SEC-66 | Audit descriptions stay fixed and stored user text escapes invisible controls.  |
+| SEC-67 | Account lock and trap use record separate events without credential material.  |
+| SEC-68 | Password changes and refusals record fixed codes and keep credentials private. |
+| SEC-69 | Administrator account operations record the actor, target and changed fields.  |
+| SEC-70 | One settings audit entry records both changes in the settings transaction.       |
+| SEC-71 | Route denials record the actor and reason. Anonymous 401s create no entry.        |
+| SEC-72 | A rolled-back state change also rolls back the audit entry written with it.     |
+| SEC-73 | An audit write failure aborts login and user creation with `AUDIT_UNAVAILABLE`.  |
+| SEC-74 | 50 concurrent appends across connections produce one gapless hash chain.        |
+| SEC-75 | Independent hashing reproduces stored hashes from the zero-filled genesis.       |
+| SEC-76 | SQLite aborts audit log updates, deletes and replacements.                       |
 
 API tests invoke the exported Next.js route handlers with real `Request` objects and the cookie
 jar in `tests/helpers/api-client.ts`; no Angular code is involved. Database fixtures create an
@@ -93,6 +107,20 @@ reverted immediately after observing the named failure:
 
 The temporary-password boundary suite uses only `FakeClock`; it never sleeps. Fixtures use
 synthetic values generated inside tests and contain no deployable or reusable credentials.
+
+### Mutating route audit coverage (SD-73)
+
+The registry in `tests/audit-coverage.test.ts` matches named mutating handlers to their required
+actions or to a written exemption. The integration cases send valid requests through the exported
+handlers and check the audit rows appended by each request. Exemptions cover transient CAPTCHA and
+TOTP setup, Module 2 operational records, and ticket workflow changes.
+
+Two temporary mutations were observed to fail and were then reverted.
+
+| Temporary mutation | Observed failure |
+| --- | --- |
+| Add a `POST` handler named `audit.coverage.unregistered_probe` | The registry check reports the route and its missing audit coverage decision. |
+| Remove the `SETTINGS_CHANGED` append | The settings request succeeds and its coverage case fails because the required entry is absent. |
 
 ## TOTP extra-credit coverage
 

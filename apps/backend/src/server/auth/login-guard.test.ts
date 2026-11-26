@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { requestAudit } from '../audit/context';
 import { createMigratedDb } from '../db/__fixtures__/test-db';
 import { CaptchaFailedError } from '../http/errors';
 import { LOGIN_GUARD_STAGES, LOGIN_GUARD_STAGE_ORDER, runLoginGuard } from './login-guard';
@@ -11,6 +12,7 @@ const context = {
   now: new Date('2026-03-10T12:00:00.000Z'),
   password: 'not a real credential',
 };
+const audit = requestAudit(context.requestId, context.ip);
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -29,6 +31,7 @@ describe('login guard pipeline', () => {
     await expect(
       runLoginGuard(context, {
         db: createMigratedDb(),
+        audit,
         maxAttempts: 5,
         ipFailedAttemptLimit: 20,
       }),
@@ -43,6 +46,7 @@ describe('login guard pipeline', () => {
     if (!captcha || !honeytoken || !accountLock) throw new Error('guard stage is missing');
     vi.spyOn(captcha, 'run').mockReturnValue({
       status: 'refused',
+      reason: 'CAPTCHA_FAILED',
       error: new CaptchaFailedError(),
     });
     const honeytokenRun = vi.spyOn(honeytoken, 'run');
@@ -50,6 +54,7 @@ describe('login guard pipeline', () => {
 
     const result = await runLoginGuard(context, {
       db: createMigratedDb(),
+      audit,
       maxAttempts: 5,
       ipFailedAttemptLimit: 20,
     });

@@ -285,25 +285,6 @@ const MESSAGES: Record<NumberField, Record<string, string>> = {
       </form>
     }
   `,
-  styles: `
-    .field {
-      display: flex;
-      flex-direction: column;
-      margin-block: 0.75em;
-      max-width: 28em;
-    }
-    .group {
-      margin-block: 1em;
-      max-width: 30em;
-    }
-    .hint {
-      margin: 0.25em 0 0;
-    }
-    .error {
-      margin: 0.25em 0 0;
-      color: #b3261e;
-    }
-  `,
 })
 export class SecuritySettingsComponent {
   private readonly api = inject(AdminApi);

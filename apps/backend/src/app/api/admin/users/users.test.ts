@@ -13,10 +13,11 @@ import {
 import { captureOutput } from '../../../../server/__fixtures__/capture-output';
 import { seedWorld, signInAs } from '../../../../server/db/__fixtures__/seeded-world';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
-import { insertUser } from '../../../../server/db/__fixtures__/test-db';
+import { insertUser, rejectAuditInserts } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
 import {
   type AuthStage,
+  auditLog,
   passwordHistory,
   permissions,
   rolePermissions,
@@ -499,6 +500,85 @@ const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
 const PROTECTED = 'PROTECTED_ACCOUNT';
 
 const userCount = () => db.select().from(users).all().length;
+
+describe('audit policy on administrator routes', () => {
+  it('SEC-73 returns generic AUDIT_UNAVAILABLE and rolls back account creation', async () => {
+    const original = db.select().from(users).all();
+    rejectAuditInserts(db);
+
+    const response = await apiCreate(asUser('ADMIN'), NEW_USER);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'AUDIT_UNAVAILABLE',
+        message: 'Nie można zapisać zdarzenia w dzienniku. Operacja została przerwana',
+      },
+    });
+    expect(db.select().from(users).all()).toEqual(original);
+    expect(db.select().from(auditLog).all()).toEqual([]);
+  });
+
+  it('records the authenticated actor, raw IPv6 address and request id', async () => {
+    vi.stubEnv('TRUST_PROXY', 'true');
+    vi.stubEnv('TRUSTED_PROXY_HOPS', '1');
+    const response = await asUser('ADMIN').post(usersRoute, '/api/admin/users', {
+      json: NEW_USER,
+      headers: { 'x-forwarded-for': '198.51.100.23, 2001:db8::1234' },
+    });
+    const { user } = await body(response);
+
+    expect(response.status).toBe(201);
+    expect(db.select().from(auditLog).all()).toMatchObject([
+      {
+        action: 'USER_CREATED',
+        actorUserId: ids.ADMIN,
+        actorLogin: 'ADMIN',
+        actorType: 'USER',
+        ip: '2001:db8::1234',
+        requestId: expect.stringMatching(/^[\da-f-]{36}$/),
+        subjectLogin: NEW_USER.login,
+        details: JSON.stringify({ userId: user.id }),
+      },
+    ]);
+  });
+
+  it('records a permission denial with the authenticated identity', async () => {
+    const response = await apiList(asUser('guest1'));
+
+    expect(response.status).toBe(403);
+    const entry = db.select().from(auditLog).get();
+    expect(entry).toMatchObject({
+      action: 'ACCESS_DENIED',
+      outcome: 'FAILURE',
+      actorType: 'USER',
+      actorUserId: ids.guest1,
+      actorLogin: 'guest1',
+      details: '{"reason":"PERMISSION","route":"admin.users.list"}',
+    });
+    expect(console.info).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: 'admin.users.list.denied',
+        requestId: entry?.requestId,
+      }),
+    );
+  });
+
+  it('returns the original 403 and logs only request metadata if denial recording fails', async () => {
+    rejectAuditInserts(db);
+
+    const response = await apiList(asUser('guest1'));
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe(FORBIDDEN);
+    expect(db.select().from(auditLog).all()).toEqual([]);
+    const entries = vi.mocked(console.info).mock.calls.map(([line]) => JSON.parse(line));
+    expect(entries).toEqual([
+      { event: 'audit.append.failure', requestId: expect.any(String) },
+      { event: 'admin.users.list.denied', requestId: entries[0]?.requestId },
+    ]);
+  });
+});
 const errorCode = async (response: Response) => (await body(response)).error.code;
 
 describe('POST /api/admin/users: what is created', () => {

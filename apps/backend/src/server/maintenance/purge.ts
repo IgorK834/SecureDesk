@@ -1,4 +1,5 @@
 import { and, isNotNull, lt, ne, or } from 'drizzle-orm';
+import { systemAudit } from '../audit/context';
 import type { AppDb } from '../db/connection';
 import { captchaChallenges, loginAttempts, securityEvents } from '../db/schema';
 import { readSecuritySettings } from '../security/settings';
@@ -33,29 +34,43 @@ export function purgeExpired(db: AppDb, now: Date = clock.now()): PurgeResult {
   const at = now.getTime();
   const horizonMs = readSecuritySettings(db).securityEventRetentionDays * DAY_MS;
 
-  return db.transaction((tx) => ({
-    loginAttempts: tx
-      .delete(loginAttempts)
-      .where(lt(loginAttempts.occurredAt, new Date(at - LOGIN_ATTEMPT_RETENTION_MS)))
-      .run().changes,
-    captchaChallenges: tx
-      .delete(captchaChallenges)
-      .where(lt(captchaChallenges.createdAt, new Date(at - CAPTCHA_CHALLENGE_RETENTION_MS)))
-      .run().changes,
-    securityEvents: tx
-      .delete(securityEvents)
-      .where(
-        and(
-          lt(securityEvents.occurredAt, new Date(at - horizonMs)),
-          or(
-            ne(securityEvents.severity, 'CRITICAL'),
-            isNotNull(securityEvents.acknowledgedAt),
-            lt(securityEvents.occurredAt, new Date(at - 2 * horizonMs)),
+  return db.transaction((tx) => {
+    const result = {
+      loginAttempts: tx
+        .delete(loginAttempts)
+        .where(lt(loginAttempts.occurredAt, new Date(at - LOGIN_ATTEMPT_RETENTION_MS)))
+        .run().changes,
+      captchaChallenges: tx
+        .delete(captchaChallenges)
+        .where(lt(captchaChallenges.createdAt, new Date(at - CAPTCHA_CHALLENGE_RETENTION_MS)))
+        .run().changes,
+      securityEvents: tx
+        .delete(securityEvents)
+        .where(
+          and(
+            lt(securityEvents.occurredAt, new Date(at - horizonMs)),
+            or(
+              ne(securityEvents.severity, 'CRITICAL'),
+              isNotNull(securityEvents.acknowledgedAt),
+              lt(securityEvents.occurredAt, new Date(at - 2 * horizonMs)),
+            ),
           ),
-        ),
-      )
-      .run().changes,
-  }));
+        )
+        .run().changes,
+    };
+    if (Object.values(result).some((count) => count > 0)) {
+      systemAudit().record(tx, {
+        action: 'RETENTION_PURGED',
+        outcome: 'SUCCESS',
+        details: {
+          attemptsRemoved: result.loginAttempts,
+          challengesRemoved: result.captchaChallenges,
+          eventsRemoved: result.securityEvents,
+        },
+      });
+    }
+    return result;
+  });
 }
 
 // When each connection last purged. Per connection, not per process, so that a test database

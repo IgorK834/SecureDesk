@@ -12,6 +12,6 @@ export const POST = defineRoute({
   name: 'admin.users.unlock',
   auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_UNLOCK },
   params: UserParams,
-  handler: ({ requestId, session, params }) =>
-    noStoreJson(unlockUserLogin(db, params.id, { adminId: session.user.id, requestId })),
+  handler: ({ requestId, session, params, audit }) =>
+    noStoreJson(unlockUserLogin(db, params.id, { adminId: session.user.id, requestId }, audit)),
 });

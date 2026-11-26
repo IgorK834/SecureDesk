@@ -1,7 +1,12 @@
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import type { AppDb } from '../db/connection';
 import { type TicketRow, type TicketStatus, tickets, users } from '../db/schema';
-import { ForbiddenError, NotFoundError, ValidationError } from '../http/errors';
+import {
+  ForbiddenError,
+  NotFoundError,
+  ObjectAccessDeniedError,
+  ValidationError,
+} from '../http/errors';
 import { ROLES } from '../permissions/codes';
 import { type TicketDto, toTicketDto } from './mappers';
 import {
@@ -25,7 +30,8 @@ type TicketDb = Pick<AppDb, 'select' | 'insert' | 'update'>;
  */
 function readableTicket(db: TicketDb, actor: TicketActor, id: string): TicketRow {
   const ticket = db.select().from(tickets).where(eq(tickets.id, id)).get();
-  if (!ticket || !canReadTicket(actor, ticket)) throw new NotFoundError();
+  if (!ticket) throw new NotFoundError();
+  if (!canReadTicket(actor, ticket)) throw new ObjectAccessDeniedError('TICKET');
   return ticket;
 }
 

@@ -39,10 +39,14 @@ const sameFilters = (a: Filters, b: Filters) =>
   selector: 'app-users-list',
   imports: [ReactiveFormsModule, RouterLink, DatePipe, UserStatusBadgeComponent],
   template: `
-    <h1>Users</h1>
-    @if (auth.has('users:create')) {
-      <p><a routerLink="/admin/users/new">New user</a></p>
-    }
+    <div class="page-heading">
+      <h1>Users</h1>
+      @if (auth.has('users:create')) {
+        <a class="button button-primary" routerLink="/admin/users/new"
+          >New user <span aria-hidden="true">↗</span></a
+        >
+      }
+    </div>
 
     <form [formGroup]="form" role="search" aria-label="Filter users">
       <label>
@@ -142,33 +146,6 @@ const sameFilters = (a: Filters, b: Filters) =>
           </nav>
         }
       }
-    }
-  `,
-  styles: `
-    form {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1em;
-      margin-block: 1em;
-    }
-    label {
-      display: flex;
-      flex-direction: column;
-    }
-    table {
-      border-collapse: collapse;
-    }
-    th,
-    td {
-      padding: 0.25em 0.75em;
-      text-align: left;
-    }
-    .visually-hidden {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
     }
   `,
 })

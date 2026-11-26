@@ -154,18 +154,6 @@ const MESSAGES: Record<string, Record<string, string>> = {
 
     <app-temporary-password-dialog />
   `,
-  styles: `
-    .field {
-      display: flex;
-      flex-direction: column;
-      margin-block: 0.75em;
-      max-width: 24em;
-    }
-    .error {
-      margin: 0.25em 0 0;
-      color: #b3261e;
-    }
-  `,
 })
 export class UserFormComponent {
   private readonly api = inject(AdminApi);

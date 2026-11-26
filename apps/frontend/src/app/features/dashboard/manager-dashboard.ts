@@ -11,7 +11,7 @@ import { loadTicketSummary } from './ticket-summary';
   imports: [RouterLink],
   template: `
     <h1>Manager dashboard</h1>
-    <p>See and assign every ticket, and update the status of any ticket.</p>
+    <p class="dashboard-intro">See and assign every ticket, and update the status of any ticket.</p>
     @if (summary(); as counts) {
       <dl>
         <div>
@@ -30,22 +30,12 @@ import { loadTicketSummary } from './ticket-summary';
     } @else {
       <p role="status">Ticket counts are unavailable.</p>
     }
-    <p><a routerLink="/tickets">Open tickets and assign work</a></p>
-  `,
-  styles: `
-    dl {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-    dl div {
-      padding: 0.75rem;
-      border: 1px solid #aaa;
-    }
-    dd {
-      margin: 0.25rem 0 0;
-      font-size: 1.5rem;
-    }
+    <div class="dashboard-actions">
+      <a class="card" routerLink="/tickets">
+        <strong>Open tickets and assign work</strong>
+        <span>Review the queue, choose assignees and update ticket status.</span>
+      </a>
+    </div>
   `,
 })
 export class ManagerDashboard {

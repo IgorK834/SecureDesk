@@ -74,26 +74,6 @@ type BlocksState = { kind: 'loading' } | { kind: 'ready' } | { kind: 'error' };
     }
     <app-confirm-dialog />
   `,
-  styles: `
-    table {
-      border-collapse: collapse;
-    }
-    th,
-    td {
-      padding: 0.25em 0.75em;
-      text-align: left;
-    }
-    .error {
-      color: #b3261e;
-    }
-    .visually-hidden {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
-    }
-  `,
 })
 export class IpBlocksComponent {
   private readonly api = inject(AdminApi);

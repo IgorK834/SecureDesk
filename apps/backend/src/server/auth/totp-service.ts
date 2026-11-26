@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import { generateSecret, generateURI, verify } from 'otplib';
+import { systemAudit, type AuditContext } from '../audit/context';
 import type { AppDb } from '../db/connection';
 import { type UserRow, users } from '../db/schema';
 import { ApiError, UnauthorizedError } from '../http/errors';
@@ -10,7 +11,6 @@ import {
   type CreatedSession,
   type SessionInfo,
   createSession,
-  revokeAllForUser,
   revokeSession,
 } from './session-service';
 import { SlidingWindowRateLimiter } from '../security/rate-limiter';
@@ -77,21 +77,45 @@ function activeUser(db: AppDb, userId: string): UserRow {
   return user;
 }
 
-type CodeResult = { valid: false } | { valid: true; timeStep: number };
+type ChallengeFailure = 'INVALID_CODE' | 'REPLAYED_CODE' | 'RATE_LIMITED';
+type CodeResult =
+  | { valid: false; reason: Exclude<ChallengeFailure, 'RATE_LIMITED'> }
+  | { valid: true; timeStep: number };
 
-async function checkCode(user: UserRow, code: string): Promise<CodeResult> {
+async function checkCode(
+  user: UserRow,
+  code: string,
+  distinguishReplay = false,
+): Promise<CodeResult> {
   const encrypted = user.totpSecretEncrypted;
   if (!encrypted) throw notEnrolled();
-  const result = await verify({
+  const options = {
     secret: decryptTotpSecret(encrypted),
     token: code,
     epoch: Math.floor(clock.now().getTime() / 1000),
     epochTolerance: TOTP_PERIOD_SECONDS,
+  };
+  const result = await verify({
+    ...options,
     ...(user.totpLastUsedStep === null ? {} : { afterTimeStep: user.totpLastUsedStep }),
   });
-  return result.valid && 'timeStep' in result
-    ? { valid: true, timeStep: result.timeStep }
-    : { valid: false };
+  if (result.valid && 'timeStep' in result) return { valid: true, timeStep: result.timeStep };
+  // Keep the same replay protection and client error. The second check only classifies the audit reason.
+  const replay =
+    distinguishReplay && user.totpLastUsedStep !== null && (await verify(options)).valid;
+  return { valid: false, reason: replay ? 'REPLAYED_CODE' : 'INVALID_CODE' };
+}
+
+function recordChallengeFailure(db: AppDb, audit: AuditContext, reason: ChallengeFailure): void {
+  audit.record(
+    db,
+    {
+      action: 'AUTH_TOTP_CHALLENGE',
+      outcome: 'FAILURE',
+      details: { reason },
+    },
+    'refusal',
+  );
 }
 
 export function beginTotpEnrollment(db: AppDb, session: SessionInfo): { otpauthUri: string } {
@@ -117,6 +141,7 @@ export async function confirmTotpEnrollment(
   db: AppDb,
   session: SessionInfo,
   code: string,
+  audit: AuditContext = systemAudit(),
 ): Promise<void> {
   const user = activeUser(db, session.userId);
   if (user.totpEnabledAt) throw alreadyEnabled();
@@ -126,24 +151,31 @@ export async function confirmTotpEnrollment(
   const now = clock.now();
   const encrypted = user.totpSecretEncrypted;
   if (!encrypted) throw notEnrolled();
-  const changed = db
-    .update(users)
-    .set({ totpEnabledAt: now, totpLastUsedStep: result.timeStep, updatedAt: now })
-    .where(
-      and(
-        eq(users.id, user.id),
-        isNull(users.totpEnabledAt),
-        eq(users.totpSecretEncrypted, encrypted),
-      ),
-    )
-    .run().changes;
-  if (changed === 0) throw alreadyEnabled();
+  db.transaction(
+    (tx) => {
+      const changed = tx
+        .update(users)
+        .set({ totpEnabledAt: now, totpLastUsedStep: result.timeStep, updatedAt: now })
+        .where(
+          and(
+            eq(users.id, user.id),
+            isNull(users.totpEnabledAt),
+            eq(users.totpSecretEncrypted, encrypted),
+          ),
+        )
+        .run().changes;
+      if (changed === 0) throw alreadyEnabled();
+      audit.record(tx, { action: 'TOTP_ENROLLED', outcome: 'SUCCESS', details: {} });
+    },
+    { behavior: 'immediate' },
+  );
 }
 
 export async function completeTotpChallenge(
   db: AppDb,
   session: SessionInfo,
   code: string,
+  audit: AuditContext = systemAudit(),
 ): Promise<CreatedSession> {
   const decision = windows.check(
     `session:${session.id}`,
@@ -151,6 +183,7 @@ export async function completeTotpChallenge(
     TOTP_ATTEMPT_WINDOW_MS,
   );
   if (!decision.allowed) {
+    recordChallengeFailure(db, audit, 'RATE_LIMITED');
     throw new ApiError(429, 'RATE_LIMITED', 'Zbyt wiele prób. Spróbuj ponownie później', {
       retryAfterSeconds: decision.retryAfterSeconds,
     });
@@ -158,30 +191,41 @@ export async function completeTotpChallenge(
 
   const user = activeUser(db, session.userId);
   if (!user.totpEnabledAt || !user.totpSecretEncrypted) throw new UnauthorizedError();
-  const result = await checkCode(user, code);
+  const result = await checkCode(user, code, true);
   if (!result.valid) {
     windows.record(`session:${session.id}`, TOTP_ATTEMPT_WINDOW_MS);
+    recordChallengeFailure(db, audit, result.reason);
     throw invalidCode();
   }
 
-  return db.transaction((tx) => {
-    const changed = tx
-      .update(users)
-      .set({ totpLastUsedStep: result.timeStep, updatedAt: clock.now() })
-      .where(
-        and(
-          eq(users.id, user.id),
-          isNotNull(users.totpEnabledAt),
-          user.totpLastUsedStep === null
-            ? isNull(users.totpLastUsedStep)
-            : eq(users.totpLastUsedStep, user.totpLastUsedStep),
-        ),
-      )
-      .run().changes;
-    if (changed === 0) throw invalidCode();
-    revokeSession(tx, session.id);
-    return createSession(tx, user.id, 'FULLY_AUTHENTICATED');
-  });
+  const created = db.transaction(
+    (tx) => {
+      const changed = tx
+        .update(users)
+        .set({ totpLastUsedStep: result.timeStep, updatedAt: clock.now() })
+        .where(
+          and(
+            eq(users.id, user.id),
+            isNotNull(users.totpEnabledAt),
+            user.totpLastUsedStep === null
+              ? isNull(users.totpLastUsedStep)
+              : eq(users.totpLastUsedStep, user.totpLastUsedStep),
+          ),
+        )
+        .run().changes;
+      if (changed === 0) return undefined;
+      revokeSession(tx, session.id);
+      const sessionAfterChallenge = createSession(tx, user.id, 'FULLY_AUTHENTICATED');
+      audit.record(tx, { action: 'AUTH_TOTP_CHALLENGE', outcome: 'SUCCESS', details: {} });
+      return sessionAfterChallenge;
+    },
+    { behavior: 'immediate' },
+  );
+  if (!created) {
+    recordChallengeFailure(db, audit, 'INVALID_CODE');
+    throw invalidCode();
+  }
+  return created;
 }
 
 export async function disableTotp(
@@ -189,6 +233,7 @@ export async function disableTotp(
   session: SessionInfo,
   currentPassword: string,
   code: string,
+  audit: AuditContext = systemAudit(),
 ): Promise<void> {
   const user = activeUser(db, session.userId);
   if (!user.totpEnabledAt || !user.totpSecretEncrypted) throw notEnrolled();
@@ -201,35 +246,29 @@ export async function disableTotp(
   const encrypted = user.totpSecretEncrypted;
   if (!encrypted) throw notEnrolled();
   const now = clock.now();
-  const changed = db
-    .update(users)
-    .set({ totpSecretEncrypted: null, totpEnabledAt: null, totpLastUsedStep: null, updatedAt: now })
-    .where(
-      and(
-        eq(users.id, user.id),
-        isNotNull(users.totpEnabledAt),
-        eq(users.totpSecretEncrypted, encrypted),
-      ),
-    )
-    .run().changes;
-  if (changed === 0) throw notEnrolled();
-}
-
-/** Administrator recovery after an out-of-band identity check. Revokes every active session. */
-export function resetTotpForUser(db: AppDb, userId: string): void {
-  const user = activeUser(db, userId);
-  db.transaction((tx) => {
-    tx.update(users)
-      .set({
-        totpSecretEncrypted: null,
-        totpEnabledAt: null,
-        totpLastUsedStep: null,
-        updatedAt: clock.now(),
-      })
-      .where(eq(users.id, user.id))
-      .run();
-    revokeAllForUser(tx, user.id);
-  });
+  db.transaction(
+    (tx) => {
+      const changed = tx
+        .update(users)
+        .set({
+          totpSecretEncrypted: null,
+          totpEnabledAt: null,
+          totpLastUsedStep: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(users.id, user.id),
+            isNotNull(users.totpEnabledAt),
+            eq(users.totpSecretEncrypted, encrypted),
+          ),
+        )
+        .run().changes;
+      if (changed === 0) throw notEnrolled();
+      audit.record(tx, { action: 'TOTP_DISABLED', outcome: 'SUCCESS', details: {} });
+    },
+    { behavior: 'immediate' },
+  );
 }
 
 export function resetTotpRateLimiterForTests(): void {

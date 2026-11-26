@@ -10,6 +10,7 @@ erDiagram
     users |o--o{ security_events : "user_id"
     users |o--o{ security_events : "acknowledged_by"
     honeytokens |o--o{ security_events : "honeytoken_id"
+    users |o--o{ audit_log : "actor_user_id"
 
     roles {
         TEXT id PK "stable key"
@@ -108,6 +109,24 @@ erDiagram
         TEXT acknowledged_by FK
         TEXT alert_status
         INTEGER alert_attempted_at
+    }
+    audit_log {
+        INTEGER seq PK "AUTOINCREMENT"
+        TEXT id UK "UUID"
+        TEXT occurred_at "UTC ISO-8601"
+        TEXT actor_type "USER, ANONYMOUS, SYSTEM"
+        TEXT actor_user_id FK
+        TEXT actor_login
+        TEXT subject_login
+        TEXT subject_ref
+        TEXT ip
+        TEXT action
+        TEXT description
+        TEXT outcome "SUCCESS, FAILURE"
+        TEXT details "canonical JSON"
+        TEXT request_id
+        TEXT prev_hash "64 characters"
+        TEXT entry_hash "64 characters"
     }
     honeytokens {
         TEXT id PK

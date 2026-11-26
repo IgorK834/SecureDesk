@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { PERMISSIONS, ROLES } from './codes';
 
 describe('permission and role constants', () => {
-  it('define the 23 permission codes (16 of Module 1, 7 of Module 2), each exactly once', () => {
+  it('defines all 26 permission codes exactly once', () => {
     const codes = Object.values(PERMISSIONS);
 
-    expect(codes).toHaveLength(23);
-    expect(new Set(codes).size).toBe(23);
+    expect(codes).toHaveLength(26);
+    expect(new Set(codes).size).toBe(26);
     expect([...codes].sort()).toEqual(
       [
+        'audit-log:export',
+        'audit-log:read',
+        'audit-log:verify',
         'honeytokens:read',
         'honeytokens:test',
         'ip-blocks:clear',

@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { sessionCookie } from '../../../../server/auth/cookie';
-import { changePassword } from '../../../../server/auth/password-service';
+import {
+  changePassword,
+  verifyPasswordChangeCaptcha,
+} from '../../../../server/auth/password-service';
 import { db } from '../../../../server/db/client';
 import { defineRoute } from '../../../../server/http/route-handler';
-import { verifyCaptchaOrThrow } from '../../../../server/security/captcha';
 import { csrfCookie } from '../../../../server/security/csrf';
 import { logEvent } from '../../../../server/security/log-event';
-import { getClientIp } from '../../../../server/security/rate-limiter';
 import { clock } from '../../../../server/time/clock';
 
 export const runtime = 'nodejs';
@@ -47,20 +48,25 @@ export const POST = defineRoute({
   name: 'auth.change_password',
   auth: { stages: ['FULLY_AUTHENTICATED', 'PASSWORD_EXPIRED'] },
   body: ChangePasswordBody,
-  handler: async ({ request, requestId, session, body }) => {
-    const ipKey = getClientIp(request);
-    await verifyCaptchaOrThrow(body.captcha, {
-      db,
-      purpose: 'change-password',
-      ipKey,
-      now: clock.now(),
-      requestId,
-      userAgent: request.headers.get('user-agent'),
-    });
+  handler: async ({ request, requestId, session, body, audit, clientIp }) => {
+    const ipKey = clientIp.key;
+    await verifyPasswordChangeCaptcha(
+      body.captcha,
+      {
+        db,
+        purpose: 'change-password',
+        ipKey,
+        now: clock.now(),
+        requestId,
+        userAgent: request.headers.get('user-agent'),
+      },
+      audit,
+    );
     const result = await changePassword(db, session.session, body, {
       ip: ipKey,
       requestId,
       userAgent: request.headers.get('user-agent'),
+      audit,
     });
 
     logEvent('auth.change_password.success', requestId);

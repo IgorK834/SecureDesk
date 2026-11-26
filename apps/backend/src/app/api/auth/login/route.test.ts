@@ -4,12 +4,13 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { FakeClock } from '../../../../../../../tests/helpers/fake-clock';
 import { LOGIN_GUARD_STAGES } from '../../../../server/auth/login-guard';
 import { hashPassword, verifyPassword } from '../../../../server/auth/password-hasher';
-import { hashSessionToken } from '../../../../server/auth/session-service';
+import { createSession, hashSessionToken } from '../../../../server/auth/session-service';
 import { captureOutput } from '../../../../server/__fixtures__/capture-output';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
-import { insertUser } from '../../../../server/db/__fixtures__/test-db';
+import { insertUser, rejectAuditInserts } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
 import {
+  auditLog,
   honeytokens,
   loginAttempts,
   securityEvents,
@@ -97,6 +98,62 @@ function post(body: unknown, headers: Record<string, string> = {}) {
 
 const loginAs = (login: string, password: string = PASSWORD) => post({ login, password });
 
+describe('failed credential audit entries', () => {
+  it('SEC-65 stores an existing subject login and a keyed reference for an unknown login', async () => {
+    addUser();
+    vi.stubEnv('TRUST_PROXY', 'true');
+    vi.stubEnv('TRUSTED_PROXY_HOPS', '1');
+    const address = '2001:db8::1234';
+    const wrong = 'wrong-input-only-password';
+
+    expect(
+      (await post({ login: 'Employee1', password: wrong }, { 'x-forwarded-for': address })).status,
+    ).toBe(401);
+    expect((await loginAs('unknown-private-input', wrong)).status).toBe(401);
+
+    const entries = db.select().from(auditLog).orderBy(auditLog.seq).all();
+    expect(entries).toMatchObject([
+      { subjectLogin: 'employee1', subjectRef: null, actorType: 'ANONYMOUS', ip: address },
+      {
+        subjectLogin: null,
+        subjectRef: expect.stringMatching(/^ref:[a-f0-9]{16}$/),
+        actorLogin: null,
+      },
+    ]);
+    expect(JSON.stringify(entries)).not.toContain('unknown-private-input');
+    expect(JSON.stringify(entries)).not.toContain(wrong);
+  });
+
+  it('SEC-66 stores one refusal with a fixed description for a login containing a newline', async () => {
+    const response = await loginAs('admin\n2026-11-26T00:00:00.000Z AUTH_LOGIN_SUCCESS ok');
+    expect(response.status).toBe(401);
+    const entries = db.select().from(auditLog).all();
+    expect(entries).toMatchObject([
+      {
+        action: 'AUTH_LOGIN_FAILURE',
+        description: 'Sign-in refused.',
+        outcome: 'FAILURE',
+        subjectLogin: null,
+        subjectRef: expect.stringMatching(/^ref:[a-f0-9]{16}$/),
+      },
+    ]);
+    for (const value of Object.values(entries[0]!)) {
+      if (typeof value === 'string') expect(value).not.toMatch(/[\r\n]|AUTH_LOGIN_SUCCESS/);
+    }
+  });
+
+  it('keeps the same refusal when the audit write fails', async () => {
+    rejectAuditInserts(db);
+    const response = await loginAs('unknown-private-input');
+    expect(response.status).toBe(401);
+    expect(await response.text()).toBe(GENERIC_401);
+    expect(vi.mocked(console.info)).toHaveBeenCalledWith(
+      expect.stringContaining('audit.append.failure'),
+    );
+    expect(db.select().from(auditLog).all()).toEqual([]);
+  });
+});
+
 /** The value of the session cookie a response sets. */
 function cookieValue(response: Response): string {
   const header = response.headers.getSetCookie().find((c) => c.startsWith(`${COOKIE}=`));
@@ -104,6 +161,34 @@ function cookieValue(response: Response): string {
 }
 
 describe('POST /api/auth/login: success', () => {
+  it('SEC-73 returns generic AUDIT_UNAVAILABLE and rolls back session creation and revocation', async () => {
+    const id = addUser();
+    const original = createSession(db, id, 'FULLY_AUTHENTICATED');
+    const before = db.select().from(sessions).all();
+    rejectAuditInserts(db);
+
+    const response = await post(
+      { login: 'employee1', password: PASSWORD },
+      {
+        cookie: `${COOKIE}=${original.token}`,
+      },
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'AUDIT_UNAVAILABLE',
+        message: 'Nie można zapisać zdarzenia w dzienniku. Operacja została przerwana',
+      },
+    });
+    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(db.select().from(sessions).all()).toEqual(before);
+    expect(db.select().from(auditLog).all()).toEqual([]);
+    expect(db.select({ outcome: loginAttempts.outcome }).from(loginAttempts).all()).toEqual([
+      { outcome: 'PENDING' },
+    ]);
+  });
+
   it('returns 200, a session cookie and a body without any hash or token', async () => {
     const id = addUser();
 
@@ -119,6 +204,9 @@ describe('POST /api/auth/login: success', () => {
     expect(text).not.toMatch(/hash|token|argon2|\$/i);
     expect(text).not.toContain(cookieValue(response));
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(db.select().from(auditLog).all()).toMatchObject([
+      { action: 'AUTH_LOGIN_SUCCESS', actorType: 'USER', actorUserId: id, actorLogin: 'employee1' },
+    ]);
   });
 
   it('sets a protected session cookie and the Angular-readable XSRF cookie', async () => {

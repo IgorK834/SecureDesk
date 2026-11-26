@@ -75,7 +75,7 @@ export interface TemporaryPasswordDetails {
       display: block;
       padding: 0.5em;
       border: 1px solid currentColor;
-      font-family: monospace;
+      font-family: var(--mono);
       font-size: 1.25em;
       user-select: all;
     }

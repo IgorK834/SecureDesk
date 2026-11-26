@@ -41,17 +41,32 @@ import {
   styles: `
     .internal-captcha {
       display: grid;
-      gap: 0.5rem;
-      margin-block: 1rem;
+      gap: 0.75rem;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgb(255 255 255 / 3%);
+    }
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.5;
     }
     img {
+      width: 100%;
       max-width: 100%;
       height: auto;
+      border-radius: 10px;
+      background: #111214;
     }
     input {
-      font: inherit;
-      padding: 0.5rem;
+      font-family: var(--mono);
+      letter-spacing: 0.18em;
       text-transform: uppercase;
+    }
+    button {
+      margin-top: 10px;
     }
   `,
 })

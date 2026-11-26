@@ -11,7 +11,7 @@ import {
 } from '../../../../server/auth/session-service';
 import { captureOutput } from '../../../../server/__fixtures__/capture-output';
 import { setUpSharedTestDb } from '../../../../server/db/__fixtures__/shared-test-db';
-import { insertUser } from '../../../../server/db/__fixtures__/test-db';
+import { insertUser, rejectAuditInserts } from '../../../../server/db/__fixtures__/test-db';
 import { db } from '../../../../server/db/client';
 import {
   type AuthStage,
@@ -158,6 +158,21 @@ const historyRows = () =>
 const userRow = () => db.select().from(users).where(eq(users.id, userId)).get();
 
 describe('POST /api/auth/change-password: success', () => {
+  it('keeps the original credential and session when the audit insert fails', async () => {
+    const { token } = open();
+    const original = credentials();
+    const originalSessions = db.select().from(sessions).all();
+    rejectAuditInserts(db);
+
+    const response = await change(token, valid());
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: { code: 'AUDIT_UNAVAILABLE' } });
+    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(credentials()).toEqual(original);
+    expect(db.select().from(sessions).all()).toEqual(originalSessions);
+  });
+
   it('answers 200 with the profile and the stage, sets a fresh cookie and leaks neither hash nor token', async () => {
     const { token } = open();
     fakeClock.advance(MINUTE_MS);

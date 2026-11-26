@@ -20,86 +20,62 @@ const ROLE_LABELS: Record<Role, string> = {
   selector: 'app-shell',
   imports: [MainNav, RouterLink],
   template: `
-    @if (user(); as currentUser) {
-      <header>
-        <a class="brand" routerLink="/dashboard">SecureDesk</a>
-        <p>
-          <span>{{ currentUser.firstName }} {{ currentUser.lastName }}</span>
-          <span class="role">{{ roleLabel() }}</span>
-        </p>
-        <button type="button" [disabled]="loggingOut()" (click)="logout()">
-          {{ loggingOut() ? 'Signing out…' : 'Logout' }}
-        </button>
-      </header>
-    }
-    @if (user() && unacknowledgedCritical() > 0) {
-      <aside class="security-banner" role="alert">
-        {{ unacknowledgedCritical() }} unacknowledged critical security event(s).
-        <a routerLink="/admin/security-events">Review security events</a>
-      </aside>
-    }
-    <div [class.authenticated-layout]="user()">
-      @if (user()) {
-        <app-main-nav />
+    <div class="screen">
+      <div class="dots" aria-hidden="true"></div>
+      @if (user(); as currentUser) {
+        <header class="shell-header">
+          <a class="brand" routerLink="/dashboard">
+            <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
+              <g fill="currentColor">
+                <rect x="2" y="2" width="9" height="9" rx="2" />
+                <circle cx="21" cy="6.5" r="3" />
+                <circle cx="6.5" cy="21" r="3" />
+                <rect x="16.5" y="16.5" width="9" height="9" rx="2" />
+              </g>
+            </svg>
+            <span>SecureDesk</span>
+          </a>
+          <div class="nav-cluster">
+            <app-main-nav />
+            <button
+              class="logout-button"
+              type="button"
+              [disabled]="loggingOut()"
+              (click)="logout()"
+            >
+              {{ loggingOut() ? 'Signing out…' : 'Logout' }}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M7 17 17 7M8 7h9v9" />
+              </svg>
+            </button>
+          </div>
+          <p class="shell-eyebrow">
+            <span>{{ currentUser.firstName }} {{ currentUser.lastName }}</span>
+            <span aria-hidden="true">·</span>
+            <span class="role-chip">{{ roleLabel() }}</span>
+          </p>
+        </header>
       }
-      <main><ng-content /></main>
+      @if (user() && unacknowledgedCritical() > 0) {
+        <aside class="security-banner" role="alert">
+          <strong>
+            {{ unacknowledgedCritical() }} unacknowledged critical security event(s).
+          </strong>
+          <a routerLink="/admin/security-events">Review security events</a>
+        </aside>
+      }
+      <main class="shell-main"><ng-content /></main>
     </div>
-  `,
-  styles: `
-    header {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 0.75rem 1rem;
-      border-bottom: 1px solid #bbb;
-    }
-    header p {
-      display: flex;
-      gap: 0.5rem;
-      margin: 0 0 0 auto;
-    }
-    .brand {
-      color: inherit;
-      font-size: 1.25rem;
-      font-weight: bold;
-      text-decoration: none;
-    }
-    .role {
-      padding-inline: 0.5rem;
-      border: 1px solid currentColor;
-      border-radius: 0.75rem;
-    }
-    .authenticated-layout {
-      display: grid;
-      grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr);
-      gap: 1.5rem;
-      padding: 1rem;
-    }
-    main {
-      min-width: 0;
-    }
-    .security-banner {
-      padding: 0.75rem 1rem;
-      color: #5f0000;
-      background: #ffe7e7;
-      border-bottom: 1px solid #b00020;
-    }
-    .security-banner a {
-      margin-left: 0.5rem;
-    }
-    @media (max-width: 42rem) {
-      header,
-      header p {
-        align-items: flex-start;
-        flex-direction: column;
-      }
-      header p {
-        margin: 0;
-      }
-      .authenticated-layout {
-        grid-template-columns: 1fr;
-      }
-    }
   `,
 })
 export class AppShellComponent {

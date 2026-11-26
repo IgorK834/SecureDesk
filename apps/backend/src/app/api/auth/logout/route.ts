@@ -19,8 +19,15 @@ export const dynamic = 'force-dynamic';
 export const POST = defineRoute({
   name: 'auth.logout',
   auth: { stages: AUTH_STAGES },
-  handler: ({ requestId, session }) => {
-    revokeSession(db, session.session.id);
+  handler: ({ requestId, session, audit }) => {
+    db.transaction(
+      (tx) => {
+        if (revokeSession(tx, session.session.id)) {
+          audit.record(tx, { action: 'AUTH_LOGOUT', outcome: 'SUCCESS', details: {} });
+        }
+      },
+      { behavior: 'immediate' },
+    );
     logEvent('auth.logout', requestId);
 
     const response = new NextResponse(null, {

@@ -756,6 +756,91 @@ for example from cron. Nothing in this module stores a password, hash, token, CA
 answer; the administrator can shorten the retention, and an address that must be erased sooner can
 be deleted from `security_events` by hand.
 
+## Append-only audit trail
+
+`audit_log` stores individual events. Every append reads the previous hash and allocates the next
+`seq` from `sqlite_sequence` inside the same SQLite `BEGIN IMMEDIATE` transaction that inserts the
+entry. An append inside a caller's write transaction uses a savepoint and commits with that
+transaction. The clock supplies `occurred_at` as UTC ISO-8601 text with milliseconds.
+
+`defineRoute` binds an audit recorder to the resolved user, the full trusted client IP address
+and the request ID. Public requests start with an anonymous actor. A successful login binds the
+verified account before creating its audit entry. Seed and retention jobs use a `SYSTEM` actor
+with a generated request ID and no client address.
+
+Services pass their write transaction to `audit.record` so login, account creation and password
+changes commit with their audit entries. A required write that fails returns `500 AUDIT_UNAVAILABLE`
+and rolls back the transaction. Recording an already-decided refusal preserves its original response
+on failure and emits only `audit.append.failure` and the request ID to the operational log.
+
+The v1 format is a compact JSON array in a fixed field order. Details are a single JSON **string**
+inside that array, with object keys sorted lexicographically at every depth, array order preserved,
+and no extra whitespace. Nullable fields stay JSON `null`. SHA-256 hashes the UTF-8 bytes of the
+previous lowercase hexadecimal hash, one LF byte and the JSON array. The first row uses 64 ASCII
+zeros as its previous hash.
+
+This standalone Node.js snippet checks rows from `SELECT * FROM audit_log ORDER BY seq` using the
+canonical details text in each row.
+
+```js
+import { createHash } from 'node:crypto';
+
+function verifyAuditRows(rows) {
+  const fields = [
+    'seq', 'id', 'occurred_at', 'actor_type', 'actor_user_id', 'actor_login',
+    'subject_login', 'subject_ref', 'ip', 'action', 'description', 'outcome',
+    'details', 'request_id',
+  ];
+  let previous = '0'.repeat(64);
+  let seq = 1;
+  for (const row of rows) {
+    const content = JSON.stringify(['sd-audit-v1', ...fields.map((field) => row[field])]);
+    const expected = createHash('sha256').update(previous + '\n' + content, 'utf8').digest('hex');
+    if (row.seq !== seq || row.prev_hash !== previous || row.entry_hash !== expected) {
+      throw new Error(`Audit chain failed at expected row ${seq}`);
+    }
+    previous = expected;
+    seq++;
+  }
+}
+```
+
+The chain detects content changes and gaps across the supplied rows. Detecting tail truncation or a
+complete hash rewrite requires a trusted external copy of the chain head.
+
+For failed credential checks, the event stores the normalized login of an existing account or the
+registered trap. Unknown inputs are represented by `ref:` followed by the first 16 hex digits of
+HMAC-SHA-256 under `AUDIT_SUBJECT_PEPPER`. Use a separate random pepper in production and keep it
+stable across deployments so the same input maps to the same reference. The event catalogue validates
+details and supplies the description. The append path escapes invisible characters in user text
+before hashing and storing it.
+
+### Authentication events and detection inputs
+
+Login records `AUTH_LOGIN_SUCCESS` with the verified account in the session-creation transaction.
+`AUTH_LOGIN_FAILURE` records `BAD_CREDENTIALS`, `ACCOUNT_LOCKED`, `CAPTCHA_FAILED`, `HONEYPOT` or
+`IP_BLOCKED`. The credential failure that reaches the lock threshold remains `BAD_CREDENTIALS`
+and also records `AUTH_ACCOUNT_LOCKED` with a `SYSTEM` actor. The blocked-address refusal is
+recorded once per full client address in each five-minute UTC bucket. A registered trap use
+records `AUTH_TRAP_ACCOUNT_USED` alongside the ordinary login refusal.
+
+- **Failed-login burst.** Five `BAD_CREDENTIALS` or `ACCOUNT_LOCKED` failures for the same
+  `subject_login` or `subject_ref` within five minutes qualify. Refusals during an existing lock
+  count toward the burst.
+- **Success after failures.** `AUTH_LOGIN_SUCCESS` for an account qualifies after at least three
+  consecutive `BAD_CREDENTIALS` failures for that account since its previous success, with all
+  three in the preceding ten minutes. CAPTCHA, honeypot and IP-block refusals are excluded from
+  both rules.
+
+Logout records the authenticated actor in the revocation transaction. The first request that
+encounters an idle or absolute expiry records `AUTH_SESSION_EXPIRED` as `SYSTEM` with the affected
+account and the request address. The expired session stays revoked if its audit write fails.
+
+Successful password changes record the change kind. Refusals record a fixed reason and, for a
+policy violation, the fixed violation codes. Administrator resets use `PASSWORD_RESET_BY_ADMIN`.
+A single account edit can write both `USER_UPDATED` with field names and `USER_ROLE_CHANGED`
+with role IDs. Both entries commit with the edit.
+
 ## HTTP response hardening and deployment
 
 Next.js applies these headers to every `/api/**` response: `Cache-Control: no-store`,

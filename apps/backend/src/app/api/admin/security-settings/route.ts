@@ -3,7 +3,6 @@ import { noStoreJson } from '../../../../server/http/respond';
 import { defineRoute } from '../../../../server/http/route-handler';
 import { PERMISSIONS } from '../../../../server/permissions/codes';
 import { recordSecurityEvent } from '../../../../server/security/events';
-import { getClientIp } from '../../../../server/security/rate-limiter';
 import { SecuritySettingsPatch } from '../../../../server/security/schemas';
 import {
   getSecuritySettings,
@@ -32,12 +31,12 @@ export const PATCH = defineRoute({
   name: 'admin.security_settings.update',
   auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.SECURITY_SETTINGS_UPDATE },
   body: SecuritySettingsPatch,
-  handler: ({ request, requestId, session, body }) => {
-    const settings = updateSecuritySettings(db, session.user.id, body);
+  handler: ({ request, requestId, session, body, audit, clientIp }) => {
+    const settings = updateSecuritySettings(db, session.user.id, body, audit);
     recordSecurityEvent(db, {
       type: 'SECURITY_SETTINGS_CHANGED',
       requestId,
-      ipKey: getClientIp(request),
+      ipKey: clientIp.key,
       userAgent: request.headers.get('user-agent'),
       userId: session.user.id,
       details: {

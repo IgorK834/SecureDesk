@@ -23,6 +23,6 @@ export const POST = defineRoute({
   auth: { stages: ['FULLY_AUTHENTICATED'], permission: PERMISSIONS.USERS_RESET_PASSWORD },
   params: UserParams,
   body: ResetPasswordBody,
-  handler: async ({ params }) =>
-    noStoreJson({ temporaryPassword: await resetPassword(db, params.id) }),
+  handler: async ({ params, audit }) =>
+    noStoreJson({ temporaryPassword: await resetPassword(db, params.id, audit) }),
 });

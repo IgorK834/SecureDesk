@@ -17,8 +17,8 @@ export const POST = defineRoute({
   name: 'auth.totp.disable',
   auth: { stages: ['FULLY_AUTHENTICATED'] },
   body: Body,
-  handler: async ({ session, body }) => {
-    await disableTotp(db, session.session, body.currentPassword, body.code);
+  handler: async ({ session, body, audit }) => {
+    await disableTotp(db, session.session, body.currentPassword, body.code, audit);
     return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
   },
 });

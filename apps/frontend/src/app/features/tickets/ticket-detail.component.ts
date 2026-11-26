@@ -49,7 +49,16 @@ type DetailState =
         <h1>{{ ticket.title }}</h1>
         <dl>
           <dt>Status</dt>
-          <dd>{{ statusLabels[ticket.status] }}</dd>
+          <dd>
+            <span
+              class="badge"
+              [class.open]="ticket.status === 'OPEN'"
+              [class.info]="ticket.status === 'IN_PROGRESS'"
+              [class.acknowledged]="ticket.status === 'RESOLVED'"
+            >
+              {{ statusLabels[ticket.status] }}
+            </span>
+          </dd>
           <dt>Description</dt>
           <dd class="description">{{ ticket.description }}</dd>
           <dt>Created</dt>
@@ -102,27 +111,6 @@ type DetailState =
           <p role="alert" aria-live="assertive" class="error">{{ text }}</p>
         }
       }
-    }
-  `,
-  styles: `
-    dt {
-      font-weight: bold;
-    }
-    dd {
-      margin: 0 0 0.75rem;
-    }
-    .description {
-      white-space: pre-wrap;
-    }
-    .field {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-block: 1rem;
-      max-width: 42rem;
-    }
-    .error {
-      color: #b3261e;
     }
   `,
 })
