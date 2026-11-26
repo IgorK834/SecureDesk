@@ -12,8 +12,8 @@ export const POST = defineRoute({
   name: 'auth.totp.verify_enrollment',
   auth: { stages: ['FULLY_AUTHENTICATED'] },
   body: Body,
-  handler: async ({ session, body }) => {
-    await confirmTotpEnrollment(db, session.session, body.code);
+  handler: async ({ session, body, audit }) => {
+    await confirmTotpEnrollment(db, session.session, body.code, audit);
     return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
   },
 });

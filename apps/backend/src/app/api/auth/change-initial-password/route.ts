@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { sessionCookie } from '../../../../server/auth/cookie';
-import { changeInitialPassword } from '../../../../server/auth/password-service';
+import {
+  changeInitialPassword,
+  verifyPasswordChangeCaptcha,
+} from '../../../../server/auth/password-service';
 import { db } from '../../../../server/db/client';
 import { defineRoute } from '../../../../server/http/route-handler';
-import { verifyCaptchaOrThrow } from '../../../../server/security/captcha';
 import { csrfCookie } from '../../../../server/security/csrf';
 import { logEvent } from '../../../../server/security/log-event';
-import { getClientIp } from '../../../../server/security/rate-limiter';
 import { clock } from '../../../../server/time/clock';
 
 export const runtime = 'nodejs';
@@ -47,16 +48,20 @@ export const POST = defineRoute({
   name: 'auth.change_initial_password',
   auth: { stages: ['INITIAL_PASSWORD_CHANGE'] },
   body: ChangeInitialPasswordBody,
-  handler: async ({ request, requestId, session, body }) => {
-    await verifyCaptchaOrThrow(body.captcha, {
-      db,
-      purpose: 'change-password',
-      ipKey: getClientIp(request),
-      now: clock.now(),
-      requestId,
-      userAgent: request.headers.get('user-agent'),
-    });
-    const result = await changeInitialPassword(db, session.session, body);
+  handler: async ({ request, requestId, session, body, audit, clientIp }) => {
+    await verifyPasswordChangeCaptcha(
+      body.captcha,
+      {
+        db,
+        purpose: 'change-password',
+        ipKey: clientIp.key,
+        now: clock.now(),
+        requestId,
+        userAgent: request.headers.get('user-agent'),
+      },
+      audit,
+    );
+    const result = await changeInitialPassword(db, session.session, body, audit);
 
     logEvent('auth.change_initial_password.success', requestId);
     const response = NextResponse.json(
