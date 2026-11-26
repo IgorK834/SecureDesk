@@ -13,6 +13,7 @@ import {
 } from '../__fixtures__/test-db';
 import type { AppDb } from '../connection';
 import {
+  auditLog,
   honeytokens,
   permissions,
   rolePermissions,
@@ -42,6 +43,21 @@ const passwordByLogin = (result: SeedResult) =>
   Object.fromEntries(result.created.map(({ login, password }) => [login, password]));
 
 describe('seedDatabase on an empty database', () => {
+  it('records the seed as SYSTEM with counts and a request id', async () => {
+    await seedDatabase(db);
+    expect(db.select().from(auditLog).all()).toMatchObject([
+      {
+        action: 'DATABASE_SEEDED',
+        actorType: 'SYSTEM',
+        actorUserId: null,
+        actorLogin: null,
+        ip: null,
+        details: '{"accountsCreated":7,"ticketsCreated":0}',
+        requestId: expect.any(String),
+      },
+    ]);
+  });
+
   it('creates exactly 4 roles and 7 users, at least two in each of Manager, Employee and Guest', async () => {
     await seedDatabase(db);
 
@@ -85,7 +101,7 @@ describe('seedDatabase on an empty database', () => {
     }
   });
 
-  it('creates the 23 permissions and links them to roles exactly as the matrix says', async () => {
+  it('creates the 26 permissions and links them to roles exactly as the matrix says', async () => {
     await seedDatabase(db);
 
     expect(
@@ -105,7 +121,7 @@ describe('seedDatabase on an empty database', () => {
       codes.map((code) => `${roleId}|${code}`),
     );
     expect(linked.sort()).toEqual(expected.sort());
-    expect(linked).toHaveLength(29);
+    expect(linked).toHaveLength(32);
   });
 
   it('creates the single settings row with the variant-2 defaults', async () => {

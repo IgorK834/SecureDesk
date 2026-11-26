@@ -53,6 +53,9 @@ describe('exact permission set of each role (backlog section 5, least privilege)
         'ip-blocks:clear',
         'honeytokens:read',
         'honeytokens:test',
+        'audit-log:read',
+        'audit-log:export',
+        'audit-log:verify',
       ].sort(),
     );
   });
@@ -102,7 +105,7 @@ describe('exact permission set of each role (backlog section 5, least privilege)
     expect(startingWith(ROLES.ADMINISTRATOR, 'tickets:')).toEqual([]);
   });
 
-  it('grants nothing outside the 23 defined codes (a typo in the matrix would be caught here)', () => {
+  it('grants nothing outside the 26 defined codes', () => {
     const defined = new Set<string>(Object.values(PERMISSIONS));
 
     for (const role of Object.values(ROLES)) {
@@ -135,9 +138,23 @@ describe('Module 2 permission codes (backlog section 5)', () => {
   });
 });
 
+describe('Module 3 audit log permission codes', () => {
+  it('Administrator holds exactly the three audit log codes', () => {
+    expect(startingWith(ROLES.ADMINISTRATOR, 'audit-log:').sort()).toEqual([
+      'audit-log:export',
+      'audit-log:read',
+      'audit-log:verify',
+    ]);
+  });
+
+  it.each([ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.GUEST])('%s has no audit log codes', (role) => {
+    expect(startingWith(role, 'audit-log:')).toEqual([]);
+  });
+});
+
 describe('role/permission matrix (backlog section 5)', () => {
   it.each([
-    [ROLES.ADMINISTRATOR, 16],
+    [ROLES.ADMINISTRATOR, 19],
     [ROLES.MANAGER, 7],
     [ROLES.EMPLOYEE, 4],
     [ROLES.GUEST, 2],

@@ -9,7 +9,7 @@ import type { AppTransaction } from '../connection';
 import { permissions, rolePermissions, roles } from '../schema';
 
 /**
- * Writes the four roles, the 15 permissions and the role/permission links from the matrix.
+ * Writes the roles, permissions and role/permission links from the matrix.
  * Roles and permissions are inserted `ON CONFLICT DO NOTHING` on stable keys, so re-running adds
  * what is missing and never duplicates or rewrites what is there.
  *

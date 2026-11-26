@@ -1,3 +1,4 @@
+import { systemAudit } from '../../audit/context';
 import type { AppDb } from '../connection';
 import { seedHoneytokens } from './honeytokens';
 import { seedRbac } from './rbac';
@@ -41,13 +42,20 @@ export async function seedDatabase(
   { demoTickets = false }: SeedOptions = {},
 ): Promise<SeedResult> {
   const prepared = await prepareNewUsers(db);
+  const audit = systemAudit();
 
   const { createdUsers, ticketsCreated } = db.transaction((tx) => {
     seedRbac(tx);
     seedSecuritySettings(tx);
     seedHoneytokens(tx);
     const createdUsers = insertUsers(tx, prepared);
-    return { createdUsers, ticketsCreated: demoTickets ? seedTickets(tx) : 0 };
+    const ticketsCreated = demoTickets ? seedTickets(tx) : 0;
+    audit.record(tx, {
+      action: 'DATABASE_SEEDED',
+      outcome: 'SUCCESS',
+      details: { accountsCreated: createdUsers.length, ticketsCreated },
+    });
+    return { createdUsers, ticketsCreated };
   });
 
   const createdLogins = new Set(createdUsers.map(({ user }) => user.login));

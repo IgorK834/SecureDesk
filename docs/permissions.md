@@ -5,7 +5,7 @@ truth**; this document reproduces it for the report.
 
 | What                    | Where (under `apps/backend/src/server/`)                             |
 | ----------------------- | -------------------------------------------------------------------- |
-| The 23 permission codes | `permissions/codes.ts`                                               |
+| The 26 permission codes | `permissions/codes.ts`                                               |
 | Who holds which code    | `permissions/matrix.ts` (`ROLE_PERMISSIONS`), reviewed like any code |
 | Loading it into the DB  | `db/seeds/rbac.ts` (`seedRbac`)                                      |
 | Route-level check       | `http/route-handler.ts` (`defineRoute`), `permissions/authorize.ts`  |
@@ -38,6 +38,7 @@ principle of least privilege:
 | List and acknowledge security events     | Yes           | No      | No       | No    |
 | Unlock an account, list/clear IP blocks  | Yes           | No      | No       | No    |
 | See and test the honeytokens             | Yes           | No      | No       | No    |
+| Read, export and verify the audit log    | Yes           | No      | No       | No    |
 | Change own regular password              | Yes           | Yes     | Yes      | Yes   |
 | Create a ticket                          | No            | Yes     | Yes      | Yes   |
 | Read all tickets                         | No            | Yes     | No       | No    |
@@ -75,6 +76,9 @@ replaces the ownership check.
 | `ip-blocks:clear`                | Yes           | No      | No       | No    | none                                    |
 | `honeytokens:read`               | Yes           | No      | No       | No    | none: no URL or key is ever returned    |
 | `honeytokens:test`               | Yes           | No      | No       | No    | sends a clearly marked test alert       |
+| `audit-log:read`                 | Yes           | No      | No       | No    | entries, detection rules and results    |
+| `audit-log:export`               | Yes           | No      | No       | No    | none                                    |
+| `audit-log:verify`               | Yes           | No      | No       | No    | none                                    |
 | `tickets:create`                 | No            | Yes     | Yes      | Yes   | none: the creator is always the caller  |
 | `tickets:read:all`               | No            | Yes     | No       | No    | every ticket                            |
 | `tickets:read:assigned`          | No            | Yes     | Yes      | No    | only tickets assigned to the caller     |
@@ -86,6 +90,9 @@ replaces the ownership check.
 A role that holds both `read:assigned` and `read:own` (Manager, Employee) reads tickets that are
 created by **or** assigned to it. Permission input, if it is ever accepted, is validated with a Zod
 enum built from `PERMISSIONS`, never a hand-typed list, so a code cannot exist in one place only.
+
+Run `npm run db:seed` after migrating an existing deployment to synchronize its stored grants with
+the matrix.
 
 ## Why this is least privilege
 
