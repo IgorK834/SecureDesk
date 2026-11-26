@@ -22,8 +22,11 @@ button {
 img {
   width: 240px;
   height: 240px;
+  padding: 12px;
+  border-radius: 16px;
+  background: #fff;
 }
 
 .error {
-  color: #9f1d1d;
+  color: var(--danger-text);
 }

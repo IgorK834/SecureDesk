@@ -1,77 +1,142 @@
 <main class="login-page">
-  <h1>Sign in</h1>
-
-  @if (banner; as text) {
-    <p class="banner" role="status">{{ text }}</p>
-  }
-
-  <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
-    <div class="website-honeypot" aria-hidden="true">
-      <label for="website">Website</label>
-      <input
-        id="website"
-        name="website"
-        type="text"
-        formControlName="website"
-        tabindex="-1"
-        autocomplete="off"
-      />
+  <header class="login-header">
+    <div class="brand" aria-label="SecureDesk">
+      <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
+        <g fill="currentColor">
+          <rect x="2" y="2" width="9" height="9" rx="2" />
+          <circle cx="21" cy="6.5" r="3" />
+          <circle cx="6.5" cy="21" r="3" />
+          <rect x="16.5" y="16.5" width="9" height="9" rx="2" />
+        </g>
+      </svg>
+      <span>SecureDesk</span>
     </div>
+    <span class="product-note">Internal helpdesk</span>
+  </header>
 
-    <div class="field">
-      <label for="login">Login</label>
-      <input
-        id="login"
-        formControlName="login"
-        autocomplete="username"
-        [attr.aria-invalid]="fieldError('login') ? true : null"
-        [attr.aria-describedby]="fieldError('login') ? 'login-error' : null"
-        (keydown.enter)="submitOnEnter($event)"
-      />
-      @if (fieldError('login'); as text) {
-        <p id="login-error" class="field-error">{{ text }}</p>
-      }
-    </div>
+  <div class="login-layout">
+    <section class="orb-stage" aria-label="Secure sign-in protection">
+      <div class="orb-wrap">
+        <div class="orb" role="img" aria-label="Decorative sphere made of colourful dots">
+          <div class="l1"></div>
+          <div class="l2"></div>
+          <div class="sweep"></div>
+          <div class="shade"></div>
+        </div>
+        <div class="glass-card sessions orb-float" aria-hidden="true">
+          <h2>Sessions</h2>
+          <p>Cookies are checked on the server and revoked after inactivity.</p>
+        </div>
+        <div class="glass-card protection orb-float" aria-hidden="true">
+          <h2>Login protection</h2>
+          <p>Lockout, address blocks and a CAPTCHA challenge stand before every password.</p>
+        </div>
+        <svg class="orb-ring" viewBox="0 0 120 120" width="112" height="112" aria-hidden="true">
+          <defs>
+            <path id="login-ring" d="M60 60m-42 0a42 42 0 1 1 84 0 42 42 0 1 1-84 0" />
+          </defs>
+          <text>
+            <textPath href="#login-ring">Honeytokens watch · Honeytokens watch ·</textPath>
+          </text>
+        </svg>
+      </div>
+    </section>
 
-    <app-captcha purpose="login" (tokenChange)="captchaProof.set($event)" />
+    <section class="form-column">
+      <form class="login-card" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+        <div class="form-heading">
+          <h1>Sign in</h1>
+          <p>Use the login your administrator gave you.</p>
+        </div>
 
-    <div class="field">
-      <label for="password">Password</label>
-      <input
-        id="password"
-        type="password"
-        formControlName="password"
-        autocomplete="current-password"
-        [attr.aria-invalid]="fieldError('password') ? true : null"
-        [attr.aria-describedby]="fieldError('password') ? 'password-error' : null"
-        (keydown.enter)="submitOnEnter($event)"
-      />
-      @if (fieldError('password'); as text) {
-        <p id="password-error" class="field-error">{{ text }}</p>
-      }
-    </div>
+        @if (banner; as text) {
+          <p class="banner" role="status">{{ text }}</p>
+        }
 
-    <div class="request-error" role="alert" aria-live="polite">
-      @if (errorMessage(); as text) {
-        <p>{{ text }}</p>
-      } @else if (countdownMessage(); as text) {
-        <p>
-          <span aria-hidden="true">{{ text }}</span>
-          <span class="visually-hidden">{{ countdownAnnouncement() }}</span>
-        </p>
-      }
-    </div>
+        <div class="website-honeypot" aria-hidden="true">
+          <label for="website">Website</label>
+          <input
+            id="website"
+            name="website"
+            type="text"
+            formControlName="website"
+            tabindex="-1"
+            autocomplete="off"
+          />
+        </div>
 
-    <button
-      type="submit"
-      [disabled]="submitting() || countdownActive() || form.invalid || !captchaProof()"
-    >
-      @if (submitting()) {
-        <span class="spinner" aria-hidden="true"></span>
-        Signing in…
-      } @else {
-        Sign in
-      }
-    </button>
-  </form>
+        <div class="field">
+          <label for="login">Login</label>
+          <input
+            id="login"
+            formControlName="login"
+            autocomplete="username"
+            [attr.aria-invalid]="fieldError('login') ? true : null"
+            [attr.aria-describedby]="fieldError('login') ? 'login-error' : null"
+            (keydown.enter)="submitOnEnter($event)"
+          />
+          @if (fieldError('login'); as text) {
+            <p id="login-error" class="field-error">{{ text }}</p>
+          }
+        </div>
+
+        <app-captcha purpose="login" (tokenChange)="captchaProof.set($event)" />
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            formControlName="password"
+            autocomplete="current-password"
+            [attr.aria-invalid]="fieldError('password') ? true : null"
+            [attr.aria-describedby]="fieldError('password') ? 'password-error' : null"
+            (keydown.enter)="submitOnEnter($event)"
+          />
+          @if (fieldError('password'); as text) {
+            <p id="password-error" class="field-error">{{ text }}</p>
+          }
+        </div>
+
+        <div class="request-error" role="alert" aria-live="polite">
+          @if (errorMessage(); as text) {
+            <p>{{ text }}</p>
+          } @else if (countdownMessage(); as text) {
+            <p>
+              <span aria-hidden="true">{{ text }}</span>
+              <span class="visually-hidden">{{ countdownAnnouncement() }}</span>
+            </p>
+          }
+        </div>
+
+        <button
+          class="sign-in-button"
+          type="submit"
+          [disabled]="submitting() || countdownActive() || form.invalid || !captchaProof()"
+        >
+          <span>
+            @if (submitting()) {
+              <span class="spinner" aria-hidden="true"></span>
+              Signing in…
+            } @else {
+              Sign in
+            }
+          </span>
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M7 17 17 7M8 7h9v9" />
+          </svg>
+        </button>
+      </form>
+    </section>
+  </div>
 </main>

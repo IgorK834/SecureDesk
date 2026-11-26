@@ -1,0 +1,199 @@
+@property --a {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 210deg;
+}
+
+@property --b {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --r1 {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 36%;
+}
+
+@property --r2 {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 22%;
+}
+
+@keyframes orb-flow {
+  to {
+    --a: 570deg;
+  }
+}
+
+@keyframes orb-flow-alt {
+  to {
+    --a: -340deg;
+  }
+}
+
+@keyframes orb-sweep {
+  to {
+    --b: 360deg;
+  }
+}
+
+@keyframes orb-pulse-one {
+  from {
+    --r1: 27%;
+  }
+  to {
+    --r1: 41%;
+  }
+}
+
+@keyframes orb-pulse-two {
+  from {
+    --r2: 12%;
+  }
+  to {
+    --r2: 30%;
+  }
+}
+
+@keyframes orb-drift {
+  from {
+    mask-position: 6.5px 6.5px;
+  }
+  to {
+    mask-position: 19.5px 19.5px;
+  }
+}
+
+@keyframes orb-blob {
+  0% {
+    border-radius: 50%;
+    transform: scale(1);
+  }
+  50% {
+    border-radius: 47% 53% 52% 48% / 52% 46% 54% 48%;
+    transform: scale(1.025);
+  }
+  100% {
+    border-radius: 53% 47% 46% 54% / 46% 54% 48% 52%;
+    transform: scale(0.985);
+  }
+}
+
+@keyframes orb-float {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-12px);
+  }
+}
+
+@keyframes orb-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.orb {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  overflow: hidden;
+  border-radius: 50%;
+  aspect-ratio: 1;
+  background: #000;
+  animation: orb-blob 11s ease-in-out infinite alternate;
+}
+
+.orb .l1,
+.orb .l2,
+.orb .sweep,
+.orb .shade {
+  position: absolute;
+  inset: 0;
+}
+
+.orb .sweep {
+  --b: 0deg;
+  background: conic-gradient(
+    from var(--b),
+    rgb(0 0 0 / 0%) 0deg,
+    rgb(0 0 0 / 62%) 120deg,
+    rgb(0 0 0 / 0%) 240deg
+  );
+  animation: orb-sweep 9s linear infinite;
+}
+
+.orb .l1 {
+  --a: 210deg;
+  --r1: 36%;
+  background: conic-gradient(
+    from var(--a),
+    #ff3d57,
+    #ff9d2e,
+    #ffe45c,
+    #5cf0c8,
+    #2aa8ff,
+    #7a4dff,
+    #ff3d9a,
+    #ff3d57
+  );
+  mask-image: radial-gradient(circle, #000 var(--r1), transparent calc(var(--r1) + 9%));
+  mask-size: 13px 13px;
+  animation:
+    orb-flow 16s linear infinite,
+    orb-pulse-one 4.5s ease-in-out infinite alternate;
+}
+
+.orb .l2 {
+  --a: 20deg;
+  --r2: 22%;
+  background: conic-gradient(
+    from var(--a),
+    #2aa8ff,
+    #7a4dff,
+    #ff3d9a,
+    #ff9d2e,
+    #ffe45c,
+    #5cf0c8,
+    #2aa8ff
+  );
+  opacity: 0.65;
+  mix-blend-mode: screen;
+  mask-image: radial-gradient(circle, #000 var(--r2), transparent calc(var(--r2) + 10%));
+  mask-position: 6.5px 6.5px;
+  mask-size: 13px 13px;
+  animation:
+    orb-flow-alt 22s linear infinite,
+    orb-pulse-two 3.2s ease-in-out infinite alternate,
+    orb-drift 8s linear infinite;
+}
+
+.orb .shade {
+  background:
+    radial-gradient(circle at 50% 46%, rgb(0 0 0 / 0%) 28%, rgb(0 0 0 / 50%) 60%, #000 78%),
+    radial-gradient(circle at 70% 18%, rgb(0 0 0 / 65%), transparent 30%);
+}
+
+.orb-float {
+  animation: orb-float 5s ease-in-out infinite alternate;
+}
+
+.orb-ring {
+  transform-origin: 50% 50%;
+  animation: orb-turn 22s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .orb .l1,
+  .orb .l2,
+  .orb .sweep,
+  .orb-float,
+  .orb-ring {
+    animation: none !important;
+  }
+}
