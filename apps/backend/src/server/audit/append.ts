@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { desc, sql } from 'drizzle-orm';
-import type { AppDb, AppTransaction } from '../db/connection';
+import { markAuditAppended, type AppDb, type AppTransaction } from '../db/connection';
 import { auditLog, type AuditLogRow } from '../db/schema';
 import { clock, type Clock } from '../time/clock';
 import { canonicalDetails, canonicalize, computeEntryHash, GENESIS_HASH } from './chain';
@@ -66,6 +66,7 @@ export function appendAuditEntry(
         entryHash: computeEntryHash(prevHash, canonicalize(content)),
       };
       tx.insert(auditLog).values(row).run();
+      markAuditAppended(tx);
       return row;
     },
     { behavior: 'immediate' },
