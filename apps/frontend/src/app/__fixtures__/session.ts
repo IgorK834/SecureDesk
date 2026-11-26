@@ -37,6 +37,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'ip-blocks:clear',
     'honeytokens:read',
     'honeytokens:test',
+    'audit-log:read',
+    'audit-log:export',
+    'audit-log:verify',
   ],
   MANAGER: [
     'tickets:create',
