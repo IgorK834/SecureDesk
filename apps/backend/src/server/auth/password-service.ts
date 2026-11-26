@@ -1,13 +1,17 @@
+import { randomUUID } from 'node:crypto';
 import { and, desc, eq, notInArray } from 'drizzle-orm';
+import { requestAudit, type AuditContext } from '../audit/context';
 import type { AppDb, AppTransaction } from '../db/connection';
 import { type UserRow, passwordHistory, users } from '../db/schema';
-import { ApiError, PasswordChangeLockedError } from '../http/errors';
+import { ApiError, isCaptchaRefusal, PasswordChangeLockedError } from '../http/errors';
 import {
   reservePasswordChangeAttempt,
   resolvePasswordChangeAttempt,
 } from '../security/attempt-tracker';
 import { readSecuritySettings } from '../security/settings';
+import { verifyCaptchaOrThrow, type CaptchaVerificationContext } from '../security/captcha';
 import { clock } from '../time/clock';
+import { normalizeLogin } from '../users/login';
 import { type Profile, toProfile } from '../users/mappers';
 import { hashPassword, verifyPassword } from './password-hasher';
 import { validateNewPassword } from './password-policy';
@@ -26,9 +30,7 @@ import { isTemporaryPasswordExpired } from './temporary-password';
 // is replaced, every session of the user is revoked and a fresh fully authenticated one is
 // issued, all in one transaction, so a failure leaves nothing half done.
 //
-// Both throw `ApiError` (the pattern of the guards and of `defineRoute`), so a route built with
-// `defineRoute` needs no translation. Nothing here logs: a password, hash or token must never
-// reach a log line, and `defineRoute` records only the event name and the request id.
+// Both throw `ApiError` for the route wrapper. Audit entries carry only the kind or refusal codes.
 
 /** How many previous regular passwords are remembered, besides the current one (project decision). */
 export const PASSWORD_HISTORY_SIZE = 5;
@@ -56,6 +58,7 @@ export interface PasswordChangeContext {
   ip: string;
   requestId: string;
   userAgent?: string | null;
+  audit?: AuditContext;
 }
 
 const notSignedIn = () => new ApiError(401, 'AUTH_REQUIRED', 'Wymagane zalogowanie');
@@ -64,6 +67,62 @@ const notSignedIn = () => new ApiError(401, 'AUTH_REQUIRED', 'Wymagane zalogowan
 // already completed, or something else (a concurrent request, an administrator reset) replaced it.
 const alreadyCompleted = () =>
   new ApiError(409, 'PASSWORD_CHANGE_ALREADY_COMPLETED', 'Zmiana hasła została już wykonana');
+
+function passwordRefusal(error: ApiError) {
+  if (isCaptchaRefusal(error)) return { reason: 'CAPTCHA_FAILED' };
+  switch (error.code) {
+    case 'CURRENT_PASSWORD_INCORRECT':
+      return { reason: error.code };
+    case 'PASSWORD_POLICY_VIOLATION':
+      return { reason: 'POLICY_VIOLATION', violations: error.details?.violations };
+    case 'PASSWORD_REUSED':
+      return { reason: 'REUSED' };
+    case 'AUTH_PASSWORD_CHANGE_LOCKED':
+      return { reason: 'BRUTE_FORCE_LIMIT' };
+    case 'AUTH_TEMPORARY_PASSWORD_EXPIRED':
+      return { reason: 'TEMPORARY_PASSWORD_EXPIRED' };
+    case 'VALIDATION_ERROR':
+      return { reason: 'CONFIRMATION_MISMATCH' };
+    case 'PASSWORD_CHANGE_ALREADY_COMPLETED':
+      return { reason: 'ALREADY_COMPLETED' };
+  }
+}
+
+async function withPasswordRefusalAudit<T>(
+  db: AppDb,
+  audit: AuditContext,
+  subjectLogin: string | null,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    const details = error instanceof ApiError ? passwordRefusal(error) : undefined;
+    if (details)
+      audit.record(
+        db,
+        {
+          action: 'PASSWORD_CHANGE_FAILED',
+          outcome: 'FAILURE',
+          details,
+          subject: subjectLogin === null ? undefined : { subjectLogin },
+        },
+        'refusal',
+      );
+    throw error;
+  }
+}
+
+export function verifyPasswordChangeCaptcha(
+  input: unknown,
+  context: CaptchaVerificationContext,
+  audit: AuditContext,
+): Promise<void> {
+  const subject = audit.actorLogin === null ? null : normalizeLogin(audit.actorLogin);
+  return withPasswordRefusalAudit(context.db, audit, subject, () =>
+    verifyCaptchaOrThrow(input, context),
+  );
+}
 
 /** The account as it is now. The guard ran earlier, so it can only have changed in between. */
 function loadActiveUser(db: AppDb, userId: string): UserRow {
@@ -160,6 +219,23 @@ function nextStage(user: UserRow): PasswordChangeResult['authStage'] {
   return user.totpEnabledAt ? 'TOTP_CHALLENGE' : 'FULLY_AUTHENTICATED';
 }
 
+function sessionAfterPasswordChange(
+  tx: AppTransaction,
+  user: UserRow,
+  audit: AuditContext,
+  kind: 'INITIAL' | 'ORDINARY' | 'EXPIRED',
+): CreatedSession {
+  revokeAllForUser(tx, user.id);
+  const session = createSession(tx, user.id, nextStage(user));
+  audit.record(tx, {
+    action: 'PASSWORD_CHANGED',
+    outcome: 'SUCCESS',
+    details: { kind },
+    subject: { subjectLogin: user.loginNormalized },
+  });
+  return session;
+}
+
 function toResult(user: UserRow, created: CreatedSession): PasswordChangeResult {
   return {
     user: toProfile(user),
@@ -188,76 +264,79 @@ export async function changePassword(
   context: PasswordChangeContext = { ip: 'unknown', requestId: 'password-change' },
 ): Promise<PasswordChangeResult> {
   const user = loadActiveUser(db, session.userId);
-  const settings = readSecuritySettings(db);
-  const reservedAt = clock.now();
-  const reservation = reservePasswordChangeAttempt(db, {
-    loginNormalized: user.loginNormalized,
-    ipKey: context.ip,
-    now: reservedAt,
-    maxAttempts: settings.maxFailedLoginAttempts,
-  });
-  if (reservation.status === 'locked') {
-    const retryAfterSeconds = Math.max(
-      0,
-      Math.ceil((reservation.lockedUntil.getTime() - reservedAt.getTime()) / 1000),
-    );
-    throw new PasswordChangeLockedError(reservation.lockedUntil, retryAfterSeconds);
-  }
+  const audit = context.audit ?? requestAudit(context.requestId, context.ip, user);
+  return withPasswordRefusalAudit(db, audit, user.loginNormalized, async () => {
+    const settings = readSecuritySettings(db);
+    const reservedAt = clock.now();
+    const reservation = reservePasswordChangeAttempt(db, {
+      loginNormalized: user.loginNormalized,
+      ipKey: context.ip,
+      now: reservedAt,
+      maxAttempts: settings.maxFailedLoginAttempts,
+    });
+    if (reservation.status === 'locked') {
+      const retryAfterSeconds = Math.max(
+        0,
+        Math.ceil((reservation.lockedUntil.getTime() - reservedAt.getTime()) / 1000),
+      );
+      throw new PasswordChangeLockedError(reservation.lockedUntil, retryAfterSeconds);
+    }
 
-  if (!(await verifyPassword(user.passwordHash, input.currentPassword))) {
-    const now = clock.now();
-    const resolved = resolvePasswordChangeAttempt(db, reservation.attemptId, 'FAILED', {
-      now,
+    if (!(await verifyPassword(user.passwordHash, input.currentPassword))) {
+      const now = clock.now();
+      const resolved = resolvePasswordChangeAttempt(db, reservation.attemptId, 'FAILED', {
+        now,
+        maxAttempts: settings.maxFailedLoginAttempts,
+        requestId: context.requestId,
+        userId: user.id,
+        userAgent: context.userAgent,
+      });
+      if (resolved.lockedUntil) {
+        const retryAfterSeconds = Math.max(
+          0,
+          Math.ceil((resolved.lockedUntil.getTime() - now.getTime()) / 1000),
+        );
+        throw new PasswordChangeLockedError(resolved.lockedUntil, retryAfterSeconds);
+      }
+      throw new ApiError(400, 'CURRENT_PASSWORD_INCORRECT', 'Obecne hasło jest niepoprawne');
+    }
+    resolvePasswordChangeAttempt(db, reservation.attemptId, 'SUCCESS', {
+      now: clock.now(),
       maxAttempts: settings.maxFailedLoginAttempts,
       requestId: context.requestId,
       userId: user.id,
       userAgent: context.userAgent,
     });
-    if (resolved.lockedUntil) {
-      const retryAfterSeconds = Math.max(
-        0,
-        Math.ceil((resolved.lockedUntil.getTime() - now.getTime()) / 1000),
-      );
-      throw new PasswordChangeLockedError(resolved.lockedUntil, retryAfterSeconds);
-    }
-    throw new ApiError(400, 'CURRENT_PASSWORD_INCORRECT', 'Obecne hasło jest niepoprawne');
-  }
-  resolvePasswordChangeAttempt(db, reservation.attemptId, 'SUCCESS', {
-    now: clock.now(),
-    maxAttempts: settings.maxFailedLoginAttempts,
-    requestId: context.requestId,
-    userId: user.id,
-    userAgent: context.userAgent,
+    assertConfirmed(input);
+    assertPasswordPolicy(db, user, input.newPassword);
+    await assertNotReused(db, user.id, input.newPassword);
+
+    // Hashing is asynchronous and a transaction is synchronous, so the hash is made first.
+    const newHash = await hashPassword(input.newPassword);
+    const now = clock.now();
+    const kind = session.authStage === 'PASSWORD_EXPIRED' ? 'EXPIRED' : 'ORDINARY';
+
+    const created = db.transaction(
+      (tx) => {
+        // Guarded by the hash that was verified above: if another request replaced the password in
+        // the meantime this one must not overwrite it, nor file the wrong hash as "previous".
+        const { changes } = tx
+          .update(users)
+          .set({ passwordHash: newHash, passwordChangedAt: now, updatedAt: now })
+          .where(and(eq(users.id, user.id), eq(users.passwordHash, user.passwordHash)))
+          .run();
+        if (changes === 0) throw alreadyCompleted();
+
+        // A temporary password is never remembered: it was not chosen by the user.
+        if (!user.mustChangePassword) rememberPasswordHash(tx, user.id, user.passwordHash);
+
+        return sessionAfterPasswordChange(tx, user, audit, kind);
+      },
+      { behavior: 'immediate' },
+    );
+
+    return toResult(user, created);
   });
-  assertConfirmed(input);
-  assertPasswordPolicy(db, user, input.newPassword);
-  await assertNotReused(db, user.id, input.newPassword);
-
-  // Hashing is asynchronous and a transaction is synchronous, so the hash is made first.
-  const newHash = await hashPassword(input.newPassword);
-  const now = clock.now();
-
-  const created = db.transaction(
-    (tx) => {
-      // Guarded by the hash that was verified above: if another request replaced the password in
-      // the meantime this one must not overwrite it, nor file the wrong hash as "previous".
-      const { changes } = tx
-        .update(users)
-        .set({ passwordHash: newHash, passwordChangedAt: now, updatedAt: now })
-        .where(and(eq(users.id, user.id), eq(users.passwordHash, user.passwordHash)))
-        .run();
-      if (changes === 0) throw alreadyCompleted();
-
-      // A temporary password is never remembered: it was not chosen by the user.
-      if (!user.mustChangePassword) rememberPasswordHash(tx, user.id, user.passwordHash);
-
-      revokeAllForUser(tx, user.id);
-      return createSession(tx, user.id, nextStage(user));
-    },
-    { behavior: 'immediate' },
-  );
-
-  return toResult(user, created);
 }
 
 /**
@@ -270,54 +349,57 @@ export async function changeInitialPassword(
   db: AppDb,
   session: SessionInfo,
   input: ChangeInitialPasswordInput,
+  audit?: AuditContext,
 ): Promise<PasswordChangeResult> {
   const user = loadActiveUser(db, session.userId);
-  // Reachable only when a concurrent request completed the change after this one was admitted.
-  if (!user.mustChangePassword) throw alreadyCompleted();
+  const actor = audit ?? requestAudit(randomUUID(), null, user);
+  return withPasswordRefusalAudit(db, actor, user.loginNormalized, async () => {
+    // Reachable only when a concurrent request completed the change after this one was admitted.
+    if (!user.mustChangePassword) throw alreadyCompleted();
 
-  // A NULL expiry means "no deadline" (the seeded ADMIN's bootstrap password), as at login.
-  const expiresAt = user.temporaryPasswordExpiresAt;
-  if (expiresAt !== null && isTemporaryPasswordExpired(expiresAt, clock.now())) {
-    revokeSession(db, session.id);
-    throw new ApiError(401, 'AUTH_TEMPORARY_PASSWORD_EXPIRED', 'Hasło tymczasowe wygasło');
-  }
+    // A NULL expiry means "no deadline" (the seeded ADMIN's bootstrap password), as at login.
+    const expiresAt = user.temporaryPasswordExpiresAt;
+    if (expiresAt !== null && isTemporaryPasswordExpired(expiresAt, clock.now())) {
+      revokeSession(db, session.id);
+      throw new ApiError(401, 'AUTH_TEMPORARY_PASSWORD_EXPIRED', 'Hasło tymczasowe wygasło');
+    }
 
-  assertConfirmed(input);
-  assertPasswordPolicy(db, user, input.newPassword);
-  await assertNotReused(db, user.id, input.newPassword);
+    assertConfirmed(input);
+    assertPasswordPolicy(db, user, input.newPassword);
+    await assertNotReused(db, user.id, input.newPassword);
 
-  const newHash = await hashPassword(input.newPassword);
-  const now = clock.now();
+    const newHash = await hashPassword(input.newPassword);
+    const now = clock.now();
 
-  const created = db.transaction(
-    (tx) => {
-      // The guard is what makes two concurrent requests with the same session safe: the first
-      // flips the flag, so the second matches no row. The hash condition also stops this request
-      // from overwriting a temporary password an administrator reissued while it was running.
-      const { changes } = tx
-        .update(users)
-        .set({
-          passwordHash: newHash,
-          mustChangePassword: false,
-          temporaryPasswordExpiresAt: null,
-          passwordChangedAt: now,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(users.id, user.id),
-            eq(users.mustChangePassword, true),
-            eq(users.passwordHash, user.passwordHash),
-          ),
-        )
-        .run();
-      if (changes === 0) throw alreadyCompleted();
+    const created = db.transaction(
+      (tx) => {
+        // The guard is what makes two concurrent requests with the same session safe: the first
+        // flips the flag, so the second matches no row. The hash condition also stops this request
+        // from overwriting a temporary password an administrator reissued while it was running.
+        const { changes } = tx
+          .update(users)
+          .set({
+            passwordHash: newHash,
+            mustChangePassword: false,
+            temporaryPasswordExpiresAt: null,
+            passwordChangedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(users.id, user.id),
+              eq(users.mustChangePassword, true),
+              eq(users.passwordHash, user.passwordHash),
+            ),
+          )
+          .run();
+        if (changes === 0) throw alreadyCompleted();
 
-      revokeAllForUser(tx, user.id);
-      return createSession(tx, user.id, nextStage(user));
-    },
-    { behavior: 'immediate' },
-  );
+        return sessionAfterPasswordChange(tx, user, actor, 'INITIAL');
+      },
+      { behavior: 'immediate' },
+    );
 
-  return toResult(user, created);
+    return toResult(user, created);
+  });
 }

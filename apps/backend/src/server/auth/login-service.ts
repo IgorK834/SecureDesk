@@ -1,13 +1,18 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt } from 'drizzle-orm';
+import { canonicalDetails } from '../audit/chain';
+import { requestAudit, type AuditContext } from '../audit/context';
+import { subjectFor, type AuditSubject } from '../audit/subject';
 import type { AppDb } from '../db/connection';
-import { type AuthStage, type UserRow, users } from '../db/schema';
+import { auditLog, type AuthStage, type UserRow, users } from '../db/schema';
 import { AccountLockedError } from '../http/errors';
-import { resolveAttempt } from '../security/attempt-tracker';
+import { markCredentialAttempt, resolveAttempt } from '../security/attempt-tracker';
+import { AGGREGATION_BUCKET_MS } from '../security/events';
+import { logEvent } from '../security/log-event';
 import { readSecuritySettings } from '../security/settings';
 import { clock } from '../time/clock';
 import { normalizeLogin } from '../users/login';
 import { type Profile, toProfile } from '../users/mappers';
-import { runLoginGuard } from './login-guard';
+import { runLoginGuard, type LoginGuardResult } from './login-guard';
 import { getDummyHash, verifyPassword } from './password-hasher';
 import { createSession, revokeSessionByToken } from './session-service';
 import { isTemporaryPasswordExpired } from './temporary-password';
@@ -24,7 +29,7 @@ export interface LoginContext {
   db: AppDb;
   ip: string;
   userAgent?: string | null;
-  requestId: string;
+  audit: AuditContext;
   /** The session token the request already carried, if any. It is revoked on a successful login. */
   presentedSessionToken?: string;
 }
@@ -63,6 +68,51 @@ function authStageFor(user: UserRow, db: AppDb, now: Date): AuthStage {
   return user.totpEnabledAt ? 'TOTP_CHALLENGE' : 'FULLY_AUTHENTICATED';
 }
 
+function recordLoginFailure(
+  { db, audit }: LoginContext,
+  reason: Extract<LoginGuardResult, { status: 'refused' }>['reason'] | 'BAD_CREDENTIALS',
+  subject: AuditSubject,
+): void {
+  const entry = {
+    action: 'AUTH_LOGIN_FAILURE',
+    outcome: 'FAILURE',
+    details: { reason },
+    subject,
+  } as const;
+  if (reason !== 'IP_BLOCKED') {
+    audit.record(db, entry, 'refusal');
+    return;
+  }
+
+  // Serialize the lookup and append across connections. Use the full address in the audit row.
+  try {
+    db.transaction(
+      (tx) => {
+        const now = clock.now().getTime();
+        const bucket = now - (now % AGGREGATION_BUCKET_MS);
+        const existing = tx
+          .select({ seq: auditLog.seq })
+          .from(auditLog)
+          .where(
+            and(
+              eq(auditLog.action, entry.action),
+              audit.ip === null ? isNull(auditLog.ip) : eq(auditLog.ip, audit.ip),
+              eq(auditLog.details, canonicalDetails(entry.details)),
+              gte(auditLog.occurredAt, new Date(bucket).toISOString()),
+              lt(auditLog.occurredAt, new Date(bucket + AGGREGATION_BUCKET_MS).toISOString()),
+            ),
+          )
+          .limit(1)
+          .get();
+        if (!existing) audit.record(tx, entry, 'refusal');
+      },
+      { behavior: 'immediate' },
+    );
+  } catch {
+    logEvent('audit.append.failure', audit.requestId);
+  }
+}
+
 /**
  * Checks a login and, if it is valid, opens a session. Every refusal is the same
  * `invalid_credentials` result, and every attempt costs exactly one Argon2id verification
@@ -78,7 +128,7 @@ export async function authenticate(input: LoginInput, ctx: LoginContext): Promis
       ip: ctx.ip,
       normalizedLogin,
       userAgent: ctx.userAgent ?? null,
-      requestId: ctx.requestId,
+      requestId: ctx.audit.requestId,
       now: clock.now(),
       captcha: input.captcha,
       password: input.password,
@@ -86,21 +136,33 @@ export async function authenticate(input: LoginInput, ctx: LoginContext): Promis
     },
     {
       db: ctx.db,
+      audit: ctx.audit,
       maxAttempts: settings.maxFailedLoginAttempts,
       ipFailedAttemptLimit: settings.ipFailedAttemptLimit,
     },
   );
-  if (guard.status === 'refused') throw guard.error;
+  if (guard.status === 'refused') {
+    const account = ctx.db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.loginNormalized, normalizedLogin), isNull(users.deletedAt)))
+      .get();
+    recordLoginFailure(ctx, guard.reason, subjectFor(normalizedLogin, Boolean(account)));
+    throw guard.error;
+  }
 
-  const resolveFailure = () => {
+  const resolveFailure = (accountExists: boolean) => {
     const now = clock.now();
+    const subject = subjectFor(normalizedLogin, accountExists);
     const resolved = resolveAttempt(ctx.db, guard.attemptId, 'FAILED', {
       now,
       maxAttempts: settings.maxFailedLoginAttempts,
-      requestId: ctx.requestId,
+      requestId: ctx.audit.requestId,
       userAgent: ctx.userAgent,
       sprayingDistinctLoginThreshold: settings.sprayingDistinctLoginThreshold,
+      audit: { ip: ctx.audit.ip, subject },
     });
+    recordLoginFailure(ctx, 'BAD_CREDENTIALS', subject);
     if (resolved.lockedUntil) {
       const retryAfterSeconds = Math.max(
         0,
@@ -126,30 +188,35 @@ export async function authenticate(input: LoginInput, ctx: LoginContext): Promis
     input.password,
   );
   if (!user || !passwordMatches || user.isBlocked) {
-    return resolveFailure();
+    return resolveFailure(Boolean(user));
   }
 
   const now = clock.now();
   // A NULL expiry means "no deadline" (the seeded ADMIN's bootstrap password).
   const expiry = user.temporaryPasswordExpiresAt;
   if (user.mustChangePassword && expiry !== null && isTemporaryPasswordExpired(expiry, now)) {
-    return resolveFailure();
+    return resolveFailure(true);
   }
 
-  resolveAttempt(ctx.db, guard.attemptId, 'SUCCESS', {
-    now,
-    maxAttempts: settings.maxFailedLoginAttempts,
-    requestId: ctx.requestId,
-    userAgent: ctx.userAgent,
-  });
-
   const authStage = authStageFor(user, ctx.db, now);
+  const signedInAudit = requestAudit(ctx.audit.requestId, ctx.audit.ip, user);
   // A token the request already carried is revoked as the new session is created, in one
   // transaction, so a token planted before login (session fixation) never gains the user's rights.
-  const created = ctx.db.transaction((tx) => {
-    if (ctx.presentedSessionToken) revokeSessionByToken(tx, ctx.presentedSessionToken);
-    return createSession(tx, user.id, authStage);
-  });
+  const created = ctx.db.transaction(
+    (tx) => {
+      markCredentialAttempt(tx, guard.attemptId, 'SUCCESS', now);
+      if (ctx.presentedSessionToken) revokeSessionByToken(tx, ctx.presentedSessionToken);
+      const session = createSession(tx, user.id, authStage);
+      signedInAudit.record(tx, {
+        action: 'AUTH_LOGIN_SUCCESS',
+        outcome: 'SUCCESS',
+        details: {},
+        subject: { subjectLogin: normalizedLogin },
+      });
+      return session;
+    },
+    { behavior: 'immediate' },
+  );
 
   return {
     outcome: 'authenticated',

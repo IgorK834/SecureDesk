@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { requestAudit } from '../audit/context';
 import { createMigratedDb, insertUser } from '../db/__fixtures__/test-db';
 import type { AppDb } from '../db/connection';
 import { loginAttempts, securityEvents, securitySettings, sessions, users } from '../db/schema';
@@ -62,7 +63,7 @@ function attempt(login: string, password: string = PASSWORD, extra: { token?: st
     {
       db,
       ip: '203.0.113.7',
-      requestId: 'login-service-test',
+      audit: requestAudit('login-service-test', '203.0.113.7'),
       userAgent: 'vitest',
       presentedSessionToken: extra.token,
     },

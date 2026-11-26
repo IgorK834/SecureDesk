@@ -5,6 +5,7 @@ import { FakeClock } from '../../../../../tests/helpers/fake-clock';
 import { createMigratedDb, insertUser } from '../db/__fixtures__/test-db';
 import type { AppDb } from '../db/connection';
 import { sessions, users } from '../db/schema';
+import { resetTotpForUser } from '../users/account-service';
 import { hashPassword } from './password-hasher';
 import { createSession, resolveSession } from './session-service';
 import {
@@ -14,7 +15,6 @@ import {
   decryptTotpSecret,
   disableTotp,
   encryptTotpSecret,
-  resetTotpForUser,
   resetTotpRateLimiterForTests,
 } from './totp-service';
 
