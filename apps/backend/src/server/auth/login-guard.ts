@@ -1,8 +1,9 @@
 import type { AppDb } from '../db/connection';
 import { eq } from 'drizzle-orm';
+import type { AuditContext } from '../audit/context';
 import { getDummyHash, verifyPassword } from './password-hasher';
 import { honeytokens } from '../db/schema';
-import { AccountLockedError, ApiError, IpBlockedError } from '../http/errors';
+import { AccountLockedError, ApiError, IpBlockedError, isCaptchaRefusal } from '../http/errors';
 import {
   checkIpBlock,
   recordIpFailure,
@@ -32,11 +33,16 @@ export const LOGIN_GUARD_STAGE_ORDER = [
 ] as const;
 
 export type LoginGuardStageName = (typeof LOGIN_GUARD_STAGE_ORDER)[number];
-export type LoginGuardStageResult =
-  { status: 'continue'; attemptId?: string } | { status: 'refused'; error: ApiError };
+type LoginGuardRefusal = {
+  status: 'refused';
+  error: ApiError;
+  reason: 'HONEYPOT' | 'IP_BLOCKED' | 'CAPTCHA_FAILED' | 'ACCOUNT_LOCKED';
+};
+export type LoginGuardStageResult = { status: 'continue'; attemptId?: string } | LoginGuardRefusal;
 
 interface LoginGuardDependencies {
   db: AppDb;
+  audit: AuditContext;
   maxAttempts: number;
   ipFailedAttemptLimit: number;
 }
@@ -71,6 +77,7 @@ export const LOGIN_GUARD_STAGES: readonly LoginGuardStage[] = [
       });
       return {
         status: 'refused',
+        reason: 'HONEYPOT',
         error: new ApiError(401, 'AUTH_INVALID_CREDENTIALS', 'Login lub hasło niepoprawne'),
       };
     },
@@ -90,26 +97,35 @@ export const LOGIN_GUARD_STAGES: readonly LoginGuardStage[] = [
         0,
         Math.ceil((blocked.lockedUntil.getTime() - context.now.getTime()) / 1000),
       );
-      return { status: 'refused', error: new IpBlockedError(retryAfterSeconds) };
+      return {
+        status: 'refused',
+        reason: 'IP_BLOCKED',
+        error: new IpBlockedError(retryAfterSeconds),
+      };
     },
   },
   {
     name: 'captcha',
     run: async (context, { db }) => {
-      await verifyCaptchaOrThrow(context.captcha, {
-        db,
-        purpose: 'login',
-        ipKey: context.ip,
-        now: context.now,
-        requestId: context.requestId,
-        userAgent: context.userAgent,
-      });
+      try {
+        await verifyCaptchaOrThrow(context.captcha, {
+          db,
+          purpose: 'login',
+          ipKey: context.ip,
+          now: context.now,
+          requestId: context.requestId,
+          userAgent: context.userAgent,
+        });
+      } catch (error) {
+        if (!isCaptchaRefusal(error)) throw error;
+        return { status: 'refused', error, reason: 'CAPTCHA_FAILED' };
+      }
       return continueLogin();
     },
   },
   {
     name: 'honeytoken',
-    run: (context, { db }) => {
+    run: (context, { db, audit }) => {
       const token = db
         .select()
         .from(honeytokens)
@@ -127,6 +143,16 @@ export const LOGIN_GUARD_STAGES: readonly LoginGuardStage[] = [
             now: context.now,
           },
         });
+        audit.record(
+          db,
+          {
+            action: 'AUTH_TRAP_ACCOUNT_USED',
+            outcome: 'FAILURE',
+            details: { reason: 'TRAP_ACCOUNT' },
+            subject: { subjectLogin: context.normalizedLogin },
+          },
+          'refusal',
+        );
       }
       return continueLogin();
     },
@@ -149,14 +175,14 @@ export const LOGIN_GUARD_STAGES: readonly LoginGuardStage[] = [
       );
       return {
         status: 'refused',
+        reason: 'ACCOUNT_LOCKED',
         error: new AccountLockedError(reservation.lockedUntil, retryAfterSeconds),
       };
     },
   },
 ];
 
-export type LoginGuardResult =
-  { status: 'reserved'; attemptId: string } | { status: 'refused'; error: ApiError };
+export type LoginGuardResult = { status: 'reserved'; attemptId: string } | LoginGuardRefusal;
 
 export async function runLoginGuard(
   context: LoginAttemptContext,

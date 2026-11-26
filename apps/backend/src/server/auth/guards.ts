@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { db } from '../db/client';
 import type { AuthStage } from '../db/schema';
@@ -8,6 +9,7 @@ import {
   UnauthorizedError,
 } from '../http/errors';
 import { requirePermission } from '../permissions/authorize';
+import { resolveClientIp } from '../security/client-ip';
 import type { PermissionCode } from '../permissions/codes';
 import { readSessionToken } from './cookie';
 import { type ResolvedSession, resolveSession } from './session-service';
@@ -39,7 +41,22 @@ export function requireStage(
   stages: readonly AuthStage[],
   options: GuardOptions = {},
 ): ResolvedSession {
-  const resolved = resolveSession(db, readSessionToken(request));
+  return requireResolvedStage(
+    resolveSession(db, readSessionToken(request), {
+      requestId: randomUUID(),
+      ip: resolveClientIp(request.headers, process.env).raw,
+    }),
+    stages,
+    options,
+  );
+}
+
+/** Reuses the resolved identity so the wrapper can audit a refusal without a second lookup. */
+export function requireResolvedStage(
+  resolved: ResolvedSession | null,
+  stages: readonly AuthStage[],
+  options: GuardOptions = {},
+): ResolvedSession {
   if (!resolved) throw new UnauthorizedError();
 
   const { authStage } = resolved.session;
@@ -47,7 +64,7 @@ export function requireStage(
     if (authStage === 'TOTP_CHALLENGE') throw new TotpChallengeRequiredError();
     throw RESTRICTED_STAGES.includes(authStage)
       ? new PasswordChangeRequiredError()
-      : new ForbiddenError();
+      : new ForbiddenError('STAGE');
   }
   if (options.permission) requirePermission(resolved, options.permission);
 
