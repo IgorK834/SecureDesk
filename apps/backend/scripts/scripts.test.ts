@@ -3,6 +3,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { appendAuditEntry } from '../src/server/audit/append';
+import { createDb } from '../src/server/db/connection';
+import { runMigrations } from '../src/server/db/migrate';
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -106,6 +109,52 @@ describe('purge script', () => {
   });
 });
 
+it('npm run audit:verify exits 0 on an intact log and 1 after tampering', () => {
+  const filename = path.join(tmp, 'audit.sqlite');
+  const db = createDb(filename);
+  try {
+    runMigrations(db);
+    const row = appendAuditEntry(db, {
+      action: 'AUTH_LOGIN_FAILURE',
+      outcome: 'FAILURE',
+      details: { reason: 'BAD_CREDENTIALS' },
+      actorType: 'SYSTEM',
+      requestId: 'cli-fixture',
+    });
+    const runVerify = () =>
+      spawnSync('npm', ['run', 'audit:verify'], {
+        cwd: path.resolve(backendDir, '../..'),
+        env: {
+          PATH: process.env.PATH ?? '',
+          NODE_ENV: 'development',
+          DATABASE_PATH: filename,
+          E2E_DATABASE_PATH: '',
+          TEST_DATABASE_PATH: path.join(tmp, 'test.sqlite'),
+          AUDIT_ANCHOR_PATH: '',
+          ALERT_FILE_PATH: '',
+          ALERT_WEBHOOK_URL: '',
+        },
+        encoding: 'utf8',
+      });
+    const intact = runVerify();
+    expect(intact.stdout).toContain('"status":"INTACT"');
+    expect(intact.status).toBe(0);
+
+    db.$client.exec('DROP TRIGGER audit_log_no_update');
+    db.$client
+      .prepare('UPDATE audit_log SET description = ? WHERE seq = ?')
+      .run('Modified fixture', row.seq);
+    const tampered = runVerify();
+    expect(tampered.stdout).toContain('"status":"TAMPERED"');
+    expect(tampered.status).toBe(1);
+    expect(readFileSync(path.join(tmp, 'alerts', 'security-alerts.jsonl'), 'utf8')).toContain(
+      '"severity":"CRITICAL"',
+    );
+  } finally {
+    db.$client.close();
+  }
+});
+
 describe('reset-db script', () => {
   it('refuses to run when NODE_ENV=production', () => {
     const { status, out } = run(
@@ -169,6 +218,7 @@ function runNpmScript(name: string, env: Record<string, string>) {
         NODE_ENV: 'development',
         // Block .env from redirecting these commands away from the temporary databases.
         E2E_DATABASE_PATH: '',
+        AUDIT_ANCHOR_PATH: '',
         ...env,
       },
       encoding: 'utf8',

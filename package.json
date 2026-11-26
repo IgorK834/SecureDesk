@@ -30,6 +30,8 @@
     "db:reset:test": "npm run db:reset:test -w apps/backend",
     "db:seed": "npm run db:seed -w apps/backend",
     "db:seed:test": "npm run db:seed:test -w apps/backend",
+    "audit:verify": "npm run audit:verify -w apps/backend",
+    "audit:tamper-demo": "npm run audit:tamper-demo -w apps/backend",
     "maintenance:purge": "npm run maintenance:purge -w apps/backend",
     "admin:unlock": "npm run admin:unlock -w apps/backend --",
     "bot-sim": "node --experimental-strip-types scripts/bot-sim/bot-sim.ts"
