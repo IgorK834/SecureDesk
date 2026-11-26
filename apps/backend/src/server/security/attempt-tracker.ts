@@ -1,7 +1,9 @@
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { and, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
+import { systemAudit } from '../audit/context';
+import { subjectFor, type AuditSubject } from '../audit/subject';
 import { revokeAllForUser } from '../auth/session-service';
 import type { AppDb, AppTransaction } from '../db/connection';
-import { type LoginAttemptKind, loginAttempts } from '../db/schema';
+import { type LoginAttemptKind, loginAttempts, users } from '../db/schema';
 import { recordAggregated, recordSecurityEvent, recordSecurityEventOncePerBucket } from './events';
 
 export const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
@@ -89,6 +91,7 @@ export interface ResolveAttemptContext {
   requestId: string;
   userAgent?: string | null;
   sprayingDistinctLoginThreshold?: number;
+  audit?: { ip: string | null; subject: AuditSubject };
 }
 
 /** Current account lock, including pending reservations that already exhaust the budget. */
@@ -132,6 +135,29 @@ export function reserveCredentialAttempt(
   );
 }
 
+/** Resolves a reservation inside the caller's write transaction. */
+export function markCredentialAttempt(
+  tx: AppTransaction,
+  attemptId: string,
+  outcome: 'FAILED' | 'SUCCESS',
+  now: Date,
+): void {
+  const { changes } = tx
+    .update(loginAttempts)
+    .set({ outcome, resolvedAt: now })
+    .where(
+      and(
+        eq(loginAttempts.id, attemptId),
+        eq(loginAttempts.kind, 'CREDENTIAL'),
+        eq(loginAttempts.outcome, 'PENDING'),
+        isNotNull(loginAttempts.loginNormalized),
+      ),
+    )
+    .run();
+  if (changes !== 1)
+    throw new Error('credential-attempt reservation is missing or already resolved');
+}
+
 /** Resolves one login reservation and emits account-lock and spraying transitions. */
 export function resolveAttempt(
   db: AppDb,
@@ -157,10 +183,7 @@ export function resolveAttempt(
         throw new Error('credential-attempt reservation is missing or already resolved');
       }
 
-      tx.update(loginAttempts)
-        .set({ outcome, resolvedAt: ctx.now })
-        .where(eq(loginAttempts.id, attemptId))
-        .run();
+      markCredentialAttempt(tx, attemptId, outcome, ctx.now);
       if (outcome === 'SUCCESS') return {};
 
       const failures = afterLastKindReset(
@@ -168,6 +191,32 @@ export function resolveAttempt(
         'CREDENTIAL',
       ).filter((row) => row.outcome === 'FAILED');
       const until = lockedUntil(failures, ctx.maxAttempts);
+      const accountTransitioned = failures.length === ctx.maxAttempts;
+      if (until && accountTransitioned) {
+        const login = attempt.loginNormalized;
+        const subject =
+          ctx.audit?.subject ??
+          subjectFor(
+            login,
+            Boolean(
+              tx
+                .select({ id: users.id })
+                .from(users)
+                .where(and(eq(users.loginNormalized, login), isNull(users.deletedAt)))
+                .get(),
+            ),
+          );
+        systemAudit(ctx.requestId, ctx.audit?.ip).record(
+          tx,
+          {
+            action: 'AUTH_ACCOUNT_LOCKED',
+            outcome: 'SUCCESS',
+            subject,
+            details: { attempts: ctx.maxAttempts, lockedUntil: until.toISOString() },
+          },
+          'refusal',
+        );
+      }
 
       const ipFailures = afterLastIpClear(rowsForIp(tx, attempt.ipKey, ctx.now)).filter(
         (row) => row.kind === 'CREDENTIAL' && row.outcome === 'FAILED',
@@ -178,7 +227,7 @@ export function resolveAttempt(
 
       return {
         ...(until && { lockedUntil: until }),
-        accountTransitioned: failures.length === ctx.maxAttempts,
+        accountTransitioned,
         distinctLogins,
         loginNormalized: attempt.loginNormalized,
         ipKey: attempt.ipKey,
