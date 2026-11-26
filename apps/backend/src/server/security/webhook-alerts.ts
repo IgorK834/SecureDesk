@@ -33,20 +33,23 @@ export class WebhookAlertDispatcher implements AlertDispatcher {
     const rawUrl = this.env.ALERT_WEBHOOK_URL?.trim();
     if (!rawUrl) return { outcome: 'SUPPRESSED' };
 
-    const duplicate = this.db
-      .select({ id: securityEvents.id })
-      .from(securityEvents)
-      .where(
-        and(
-          eq(securityEvents.type, event.type),
-          event.ipKey === null
-            ? isNull(securityEvents.ipKey)
-            : eq(securityEvents.ipKey, event.ipKey),
-          gte(securityEvents.occurredAt, new Date(event.occurredAt.getTime() - DEDUPLICATION_MS)),
-          ne(securityEvents.id, event.id),
-        ),
-      )
-      .get();
+    // Detection alerts already carry a deduplicated finding and can differ within five minutes.
+    const duplicate =
+      event.type !== 'DETECTION_ALERT' &&
+      this.db
+        .select({ id: securityEvents.id })
+        .from(securityEvents)
+        .where(
+          and(
+            eq(securityEvents.type, event.type),
+            event.ipKey === null
+              ? isNull(securityEvents.ipKey)
+              : eq(securityEvents.ipKey, event.ipKey),
+            gte(securityEvents.occurredAt, new Date(event.occurredAt.getTime() - DEDUPLICATION_MS)),
+            ne(securityEvents.id, event.id),
+          ),
+        )
+        .get();
     if (duplicate) return { outcome: 'SUPPRESSED' };
 
     const url = new URL(rawUrl);
