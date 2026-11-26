@@ -38,6 +38,7 @@ export default defineConfig({
           exclude: [
             'tests/integration/**',
             'tests/admin-routes-authz.test.ts',
+            'tests/audit-coverage.test.ts',
             'tests/route-guard-conformance.test.ts',
             'tests/e2e/**',
           ],
@@ -51,6 +52,7 @@ export default defineConfig({
             'apps/backend/src/app/api/**/*.{test,spec}.ts',
             'tests/integration/**/*.{test,spec}.ts',
             'tests/admin-routes-authz.test.ts',
+            'tests/audit-coverage.test.ts',
             'tests/route-guard-conformance.test.ts',
           ],
         },
