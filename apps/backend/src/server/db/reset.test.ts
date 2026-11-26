@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -65,6 +65,46 @@ describe('resetDatabase', () => {
 
     expect(removed).toEqual([dev]);
     expect(existsSync(test)).toBe(true);
+  });
+
+  it('removes only development files when E2E_DATABASE_PATH is set', () => {
+    const e2e = path.join(tmp, 'e2e.sqlite');
+    const devFiles = [dev, `${dev}-wal`, `${dev}-shm`];
+    const e2eFiles = [e2e, `${e2e}-wal`, `${e2e}-shm`];
+    touch(...devFiles, ...e2eFiles);
+
+    expect(
+      resetDatabase('dev', { NODE_ENV: 'development', DATABASE_PATH: dev, E2E_DATABASE_PATH: e2e }),
+    ).toEqual(devFiles);
+    expect(devFiles.some(existsSync)).toBe(false);
+    expect(e2eFiles.every(existsSync)).toBe(true);
+  });
+
+  it('refuses an E2E alias and leaves the database and companions intact', () => {
+    const alias = path.join(tmp, 'alias');
+    const e2e = path.join(tmp, 'e2e.sqlite');
+    const e2eFiles = [e2e, `${e2e}-wal`, `${e2e}-shm`];
+    touch(...e2eFiles);
+    symlinkSync(tmp, alias, 'dir');
+
+    expect(() =>
+      resetDatabase('dev', {
+        NODE_ENV: 'development',
+        DATABASE_PATH: path.join(alias, 'e2e.sqlite'),
+        E2E_DATABASE_PATH: e2e,
+      }),
+    ).toThrow(/E2E_DATABASE_PATH/);
+    expect(e2eFiles.every(existsSync)).toBe(true);
+  });
+
+  it('refuses if a development companion is the E2E database before removing any files', () => {
+    const e2e = `${dev}-wal`;
+    touch(dev, e2e, `${dev}-shm`);
+
+    expect(() =>
+      resetDatabase('dev', { NODE_ENV: 'development', DATABASE_PATH: dev, E2E_DATABASE_PATH: e2e }),
+    ).toThrow(/E2E_DATABASE_PATH/);
+    expect([dev, e2e, `${dev}-shm`].every(existsSync)).toBe(true);
   });
 
   it.each(['dev', 'test'] as const)(

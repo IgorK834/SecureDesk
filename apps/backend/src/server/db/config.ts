@@ -1,6 +1,12 @@
 import path from 'node:path';
 
 export const MEMORY_DB = ':memory:';
+const DATABASE_PATH_VARIABLES = [
+  'DATABASE_PATH',
+  'TEST_DATABASE_PATH',
+  'E2E_DATABASE_PATH',
+] as const;
+type DatabasePathVariable = (typeof DATABASE_PATH_VARIABLES)[number];
 
 /** Thrown for any unsafe or missing database configuration. The message is safe to print. */
 export class DbConfigError extends Error {
@@ -16,13 +22,21 @@ function pathsOverlap(segments: string[], wanted: string[]): boolean {
 
 /**
  * Resolves the SQLite file for the current environment (TEST_DATABASE_PATH for unit tests,
- * E2E_DATABASE_PATH for browser tests, DATABASE_PATH otherwise) and refuses unsafe setups. Relative paths are
- * resolved against the current working directory (apps/backend for every npm script).
+ * E2E_DATABASE_PATH for browser tests, DATABASE_PATH otherwise) and refuses unsafe setups.
+ * Reset commands select their variable explicitly. Relative paths are resolved against the
+ * current working directory (apps/backend for every npm script).
  */
-export function resolveDbPath(env: NodeJS.ProcessEnv = process.env): string {
-  const isTest = env.NODE_ENV === 'test';
-  const isE2e = Boolean(env.E2E_DATABASE_PATH?.trim()) && !isTest;
-  const variable = isTest ? 'TEST_DATABASE_PATH' : isE2e ? 'E2E_DATABASE_PATH' : 'DATABASE_PATH';
+export function resolveDbPath(
+  env: NodeJS.ProcessEnv = process.env,
+  target?: DatabasePathVariable,
+): string {
+  const variable =
+    target ??
+    (env.NODE_ENV === 'test'
+      ? 'TEST_DATABASE_PATH'
+      : env.E2E_DATABASE_PATH?.trim()
+        ? 'E2E_DATABASE_PATH'
+        : 'DATABASE_PATH');
   const raw = env[variable]?.trim();
 
   if (!raw) {
@@ -32,7 +46,7 @@ export function resolveDbPath(env: NodeJS.ProcessEnv = process.env): string {
   }
 
   if (raw === MEMORY_DB) {
-    if (!isTest) {
+    if (variable !== 'TEST_DATABASE_PATH') {
       throw new DbConfigError(
         `${variable}=:memory: is only allowed when NODE_ENV=test; use a file path under data/.`,
       );
@@ -42,9 +56,7 @@ export function resolveDbPath(env: NodeJS.ProcessEnv = process.env): string {
 
   const resolved = path.resolve(raw);
 
-  const otherVariables = ['DATABASE_PATH', 'TEST_DATABASE_PATH', 'E2E_DATABASE_PATH'].filter(
-    (candidate) => candidate !== variable,
-  );
+  const otherVariables = DATABASE_PATH_VARIABLES.filter((candidate) => candidate !== variable);
   const overlap = otherVariables.find((candidate) => {
     const other = env[candidate]?.trim();
     return other && other !== MEMORY_DB && path.resolve(other) === resolved;

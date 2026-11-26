@@ -12,6 +12,13 @@ export function createMigratedDb(): AppDb {
   return db;
 }
 
+export function rejectAuditInserts(db: AppDb): void {
+  db.$client.exec(`
+    CREATE TRIGGER test_audit_write_failure BEFORE INSERT ON audit_log
+    BEGIN SELECT RAISE(ABORT, 'synthetic audit write failure'); END;
+  `);
+}
+
 /** Inserts a role if it is not there yet and returns its id. */
 export function ensureRole(db: AppDb, id: string = ROLES.EMPLOYEE): string {
   db.insert(roles)

@@ -167,6 +167,8 @@ function runNpmScript(name: string, env: Record<string, string>) {
       env: {
         PATH: `${path.join(repoRoot, 'node_modules/.bin')}${path.delimiter}${process.env.PATH ?? ''}`,
         NODE_ENV: 'development',
+        // Block .env from redirecting these commands away from the temporary databases.
+        E2E_DATABASE_PATH: '',
         ...env,
       },
       encoding: 'utf8',
@@ -199,12 +201,24 @@ describe('npm run db:reset:dev / db:reset:test', () => {
     },
   );
 
-  it('db:reset:dev removes the development database and leaves the test one', () => {
-    const { status, out } = runNpmScript('db:reset:dev', { NODE_ENV: 'development', ...files() });
+  it('db:reset:dev removes development files and preserves test and E2E files', () => {
+    const e2e = path.join(tmp, 'e2e.sqlite');
+    const protectedFiles = [testDb, e2e, `${e2e}-wal`, `${e2e}-shm`];
+    for (const filename of protectedFiles) writeFileSync(filename, 'keep');
+    const { status, out } = runNpmScript('db:reset:dev', { ...files(), E2E_DATABASE_PATH: e2e });
 
     expect(status).toBe(0);
     expect(out).toContain(`removed ${dev}`);
     expect(existsSync(dev)).toBe(false);
+    for (const filename of protectedFiles) expect(readFileSync(filename, 'utf8')).toBe('keep');
+  });
+
+  it('db:reset:dev refuses when DATABASE_PATH is the E2E database', () => {
+    const { status, out } = runNpmScript('db:reset:dev', { ...files(), E2E_DATABASE_PATH: dev });
+
+    expect(status).toBe(1);
+    expect(out).toMatch(/DATABASE_PATH and E2E_DATABASE_PATH must be different/);
+    expect(existsSync(dev)).toBe(true);
     expect(existsSync(testDb)).toBe(true);
   });
 
