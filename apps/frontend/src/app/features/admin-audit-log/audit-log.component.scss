@@ -1,0 +1,213 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.heading,
+.drawer-header,
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.heading {
+  margin-bottom: 1.25rem;
+}
+h1,
+h2 {
+  margin: 0;
+}
+.export-controls,
+.pagination div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+button {
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  padding: 0.55rem 0.8rem;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--card-hover);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(11rem, 1fr));
+  gap: 0.85rem;
+  align-items: end;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--card);
+}
+.filters label,
+.filter-field {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+  min-width: 0;
+}
+.filters input,
+.filters select {
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  background: var(--screen);
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  padding: 0.55rem 0.65rem;
+}
+.filters button {
+  justify-self: start;
+  background: var(--text);
+  color: var(--screen);
+  font-weight: 700;
+}
+.filters button:hover {
+  background: var(--muted);
+}
+.table-region {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+}
+table {
+  display: table;
+  width: 100%;
+  min-width: 57rem;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.84rem;
+  white-space: normal;
+}
+thead {
+  display: table-header-group;
+}
+tbody {
+  display: table-row-group;
+}
+th,
+td {
+  padding: 0.65rem 0.75rem;
+  vertical-align: top;
+}
+th {
+  background: var(--card);
+  color: var(--muted);
+  white-space: nowrap;
+  font-weight: 700;
+}
+td {
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+tbody tr:hover {
+  background: var(--card);
+}
+.time,
+.address,
+.action,
+.hash,
+pre {
+  font-family: var(--mono);
+}
+.time {
+  white-space: nowrap;
+}
+.action,
+.hash,
+pre {
+  overflow-wrap: anywhere;
+}
+.description {
+  min-width: 11rem;
+  max-width: 26rem;
+  white-space: pre-wrap;
+}
+.entry-link {
+  padding: 0;
+  border: 0;
+  color: var(--info);
+  text-decoration: underline;
+  background: transparent;
+  font-family: var(--mono);
+}
+.badge {
+  display: inline-flex;
+  border-radius: 1rem;
+  padding: 0.15rem 0.5rem;
+  color: var(--success);
+  background: var(--success-tint);
+}
+.badge.failure {
+  color: var(--danger-text);
+  background: var(--danger-tint);
+}
+.pagination {
+  margin-top: 0.75rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.state {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+}
+.error {
+  color: var(--danger-text);
+}
+dialog {
+  inset: 0 0 0 auto;
+  margin: 0;
+  height: 100%;
+  max-height: none;
+  width: min(34rem, 100%);
+  max-width: none;
+  padding: clamp(1rem, 4vw, 1.75rem);
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: var(--page);
+  color: var(--text);
+}
+dialog::backdrop {
+  background: rgb(0 0 0 / 65%);
+}
+dt {
+  margin-top: 0.8rem;
+  color: var(--muted);
+}
+dd {
+  margin: 0.2rem 0 0;
+}
+pre {
+  padding: 0.85rem;
+  white-space: pre-wrap;
+  background: var(--screen);
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+}
+@media (max-width: 800px) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 490px) {
+  .filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
