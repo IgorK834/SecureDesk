@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Administrator dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+:root{color-scheme:dark;--muted:#A6AAB2;--line:rgba(255,255,255,.14)}
+*{box-sizing:border-box}
+body{margin:0;background:#161617;color:#fff;font-family:'Manrope',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#fff}
+:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.wide{font-family:'Archivo',sans-serif;font-stretch:125%}
+.screen{position:relative;overflow:hidden;margin:16px;border-radius:36px;border:1px solid rgba(255,255,255,.16);background:#000;min-height:868px}
+.dots{position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(rgba(255,255,255,.38) 1.4px,transparent 1.9px);background-size:30px 30px;-webkit-mask-image:radial-gradient(ellipse at 50% 100%,#000 0,transparent 78%);mask-image:radial-gradient(ellipse at 50% 100%,#000 0,transparent 78%)}
+.pill{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px;background:#fff;border-radius:22px}
+.pill a{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:0 16px;border-radius:16px;color:#000;text-decoration:none;font:700 12px/1 'Archivo',sans-serif;font-stretch:112%;letter-spacing:0.05em;text-transform:uppercase}
+.pill a:hover{background:#EDEDED}
+.pill a.on{background:#E3E3E3}
+.pill a.cta{background:#000;color:#fff}.pill a.cta:hover{background:#222}
+.card{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.14);border-radius:24px;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+a.tile{display:flex;flex-direction:column;gap:14px;padding:24px;color:#fff;text-decoration:none;min-height:190px}
+a.tile:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.3)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.06em}
+.b-info{background:rgba(143,180,255,.14);color:#A9C4FF}
+.b-crit{background:rgba(255,90,79,.16);color:#FF8A80}
+.eyebrow{margin:0;display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted)}
+.big{font-family:'Archivo',sans-serif;font-stretch:125%;font-weight:300;font-size:56px;line-height:1;letter-spacing:-0.02em}
+.arrow{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;background:#fff;color:#000}
+</style>
+</helmet>
+<div class="screen">
+  <div class="dots" aria-hidden="true"></div>
+
+  <header style="position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;padding:28px 40px 8px">
+    <a href="Dashboard.dc.html" style="display:flex;align-items:center;gap:12px;text-decoration:none">
+      <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><g fill="#fff"><rect x="2" y="2" width="9" height="9" rx="2"/><circle cx="21" cy="6.5" r="3"/><circle cx="6.5" cy="21" r="3"/><rect x="16.5" y="16.5" width="9" height="9" rx="2"/></g></svg>
+      <span class="wide" style="font-weight:800;font-size:20px;letter-spacing:-0.01em">SecureDesk</span>
+    </a>
+    <nav class="pill" aria-label="Main">
+      <sc-for list="{{nav}}" as="item" hint-placeholder-count="7">
+        <a href="{{item.href}}" class="{{item.cls}}" aria-current="{{item.cur}}">{{item.label}}</a>
+      </sc-for>
+      <a href="Main.dc.html" class="cta">Log out
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg>
+      </a>
+    </nav>
+  </header>
+
+  <div role="status" style="position:relative;margin:16px 40px 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 20px;border-radius:18px;background:rgba(255,90,79,.12);border:1px solid rgba(255,90,79,.4);color:#FFB4AC;font-size:14px">
+    <span aria-hidden="true" style="width:10px;height:10px;border-radius:50%;background:#FF5A4F;box-shadow:0 0 14px 4px rgba(255,90,79,.7)"></span>
+    <strong style="font-weight:700">2 unacknowledged critical security events.</strong>
+    <a href="SecurityEvents.dc.html" style="color:#fff;font-weight:700">Review security events</a>
+  </div>
+
+  <main style="position:relative;padding:48px 40px 56px;display:flex;flex-direction:column;gap:40px">
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <p class="eyebrow"><span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:#fff"></span>System Administrator · Administrator</p>
+      <h1 class="wide" style="margin:0;font-weight:300;font-size:clamp(36px,4.6vw,64px);line-height:1.02;letter-spacing:-0.02em;text-transform:uppercase;max-width:960px">Administrator dashboard</h1>
+      <p style="margin:0;font-size:17px;line-height:1.55;color:var(--muted);max-width:620px">Manage user accounts and the global security settings. Ticket content is not available to this role.</p>
+    </div>
+
+    <section aria-label="At a glance" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+      <div class="card" style="padding:24px;display:flex;flex-direction:column;gap:14px">
+        <span style="font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)">Accounts</span>
+        <span class="big">7</span>
+        <span style="font-size:14px;color:var(--muted)">4 active</span>
+      </div>
+      <div class="card" style="padding:24px;display:flex;flex-direction:column;gap:14px">
+        <span style="font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)">Pending first login</span>
+        <span class="big">3</span>
+        <span style="font-size:14px;color:var(--muted)">Temporary password not yet replaced</span>
+      </div>
+      <div class="card" style="padding:24px;display:flex;flex-direction:column;gap:14px;background:rgba(255,90,79,.1);border-color:rgba(255,90,79,.45)">
+        <span style="display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#FFB4AC"><span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:#FF5A4F;box-shadow:0 0 12px 3px rgba(255,90,79,.8)"></span>Critical events</span>
+        <span class="big" style="color:#FF8A80">2</span>
+        <span style="font-size:14px;color:#FFB4AC">Honeytoken triggered</span>
+      </div>
+      <div class="card" style="padding:24px;display:flex;flex-direction:column;gap:14px">
+        <span style="font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)">Honeytokens armed</span>
+        <span class="big">2</span>
+        <span style="font-size:14px;color:var(--muted)">Account trap and AWS key</span>
+      </div>
+    </section>
+
+    <section aria-label="Shortcuts" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
+      <a href="Users.dc.html" class="card tile">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <h2 class="wide" style="margin:0;font-size:22px;font-weight:600;text-transform:uppercase;letter-spacing:0.01em">Users</h2>
+          <span class="arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+        </div>
+        <span style="font-size:15px;line-height:1.55;color:var(--muted)">Create accounts, edit access and reset passwords.</span>
+      </a>
+      <a href="SecuritySettings.dc.html" class="card tile">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <h2 class="wide" style="margin:0;font-size:22px;font-weight:600;text-transform:uppercase;letter-spacing:0.01em">Security settings</h2>
+          <span class="arrow" style="flex:none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+        </div>
+        <span style="font-size:15px;line-height:1.55;color:var(--muted)">Configure password rules, expiry and session inactivity.</span>
+      </a>
+      <a href="SecurityEvents.dc.html" class="card tile">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <h2 class="wide" style="margin:0;font-size:22px;font-weight:600;text-transform:uppercase;letter-spacing:0.01em">Security events</h2>
+          <span class="arrow" style="flex:none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+        </div>
+        <span style="font-size:15px;line-height:1.55;color:var(--muted)">Review alerts, acknowledge incidents and test honeytokens.</span>
+      </a>
+    </section>
+
+    <section class="card" aria-labelledby="recent" style="overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 28px;border-bottom:1px solid var(--line)">
+        <h2 id="recent" class="wide" style="margin:0;font-size:16px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em">Latest security events</h2>
+        <a href="SecurityEvents.dc.html" style="font-size:14px;font-weight:700">View all</a>
+      </div>
+      <ul style="list-style:none;margin:0;padding:0">
+        <li style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:18px 28px;border-bottom:1px solid var(--line)">
+          <span class="badge b-info">INFO</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500">HONEYTOKEN_TESTED</span>
+          <span style="flex:1 1 200px;font-size:14px;color:var(--muted)">Test alert for Backup AWS credentials</span>
+          <span style="font-size:13px;color:var(--muted)">Nov 5, 12:18</span>
+        </li>
+        <li style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:18px 28px">
+          <span class="badge b-crit">CRITICAL</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500">HONEYTOKEN_TRIGGERED</span>
+          <span style="flex:1 1 200px;font-size:14px;color:var(--muted)">Account trap used from 198.51.100.22</span>
+          <span style="font-size:13px;color:var(--muted)">Nov 5, 12:18</span>
+        </li>
+      </ul>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const items = [
+      ['Dashboard', 'Dashboard.dc.html', true],
+      ['Password', '#', false],
+      ['Two-factor', '#', false],
+      ['Users', 'Users.dc.html', false],
+      ['Security settings', 'SecuritySettings.dc.html', false],
+      ['Address blocks', '#', false],
+      ['Security events', 'SecurityEvents.dc.html', false]
+    ];
+    return { nav: items.map(([label, href, on]) => ({ label, href, cls: on ? 'on' : '', cur: on ? 'page' : null })) };
+  }
+}
+</script>
+</body>
+</html>

@@ -96,6 +96,10 @@ the matrix.
 
 ## Why this is least privilege
 
+Module 3 retains the four existing roles. The Administrator holds the separate audit read,
+export and verification permissions. Reading also covers the detection rules and their last
+alert times. There is no audit mutation permission or endpoint.
+
 - **Administrator: identities, security settings and abuse-defence tooling, no tickets.** The seven
   Module 2 codes (security events, account unlock, IP blocks, honeytokens) belong to the
   Administrator alone; Manager, Employee and Guest hold none of them, and `matrix.test.ts` pins that.

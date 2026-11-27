@@ -6,87 +6,104 @@ requires every listed identifier to occur in a real `describe`, `it` or `test` t
 
 ## Security scenario matrix
 
-| ID     | Proof in the automated suite                                                   |
-| ------ | ------------------------------------------------------------------------------ |
-| SEC-01 | Unknown login receives the generic invalid-credentials result.                 |
-| SEC-02 | A known login with the wrong password receives the identical result.           |
-| SEC-03 | Passwords are stored as salted Argon2id PHC strings, never plaintext.          |
-| SEC-04 | A temporary credential opens only an initial-password-change session.          |
-| SEC-05 | That restricted session cannot call the administrator API.                     |
-| SEC-06 | A temporary password remains valid immediately before twelve hours.            |
-| SEC-07 | It expires at exactly twelve hours under the fake clock.                       |
-| SEC-08 | One thousand generated temporary passwords meet the 16-character format.       |
-| SEC-09 | Eleven characters are below the regular-password minimum.                      |
-| SEC-10 | Twelve characters satisfy the length boundary.                                 |
-| SEC-11 | Case-varied personal data is rejected when the setting is enabled.             |
-| SEC-12 | The same personal-data match is allowed when the setting is disabled.          |
-| SEC-13 | A wrong current password changes no credential state.                          |
-| SEC-14 | The current and last five password hashes cannot be reused.                    |
-| SEC-15 | A Guest receives 403 from every administrator route.                           |
-| SEC-16 | An anonymous caller receives 401 from every administrator route.               |
-| SEC-17 | An unreadable ticket is indistinguishable from a missing ticket.               |
-| SEC-18 | Blocking an account revokes its live sessions.                                 |
-| SEC-19 | Soft-deleting an account revokes its live sessions.                            |
-| SEC-20 | Resetting a password revokes sessions and the old credential.                  |
-| SEC-21 | Logout invalidates the copied old cookie.                                      |
-| SEC-22 | The backend revokes an idle-expired session.                                   |
-| SEC-23 | A changed idle timeout applies to an already-open session.                     |
-| SEC-24 | Foreign origins and missing or incorrect XSRF tokens cannot run a mutation.    |
-| SEC-25 | SQL-looking input is data; parser failures and internal failures stay generic. |
-| SEC-26 | HTML-looking ticket text renders as text without creating executable markup.   |
-| SEC-27 | The sixth failure is throttled identically for known and unknown logins.       |
-| SEC-28 | Strict update schemas reject hidden privileged fields.                         |
-| SEC-29 | Direct mutations of the protected ADMIN account are rejected.                  |
-| SEC-30 | An unexpired server-side session survives reopening the persistent database.   |
-| SEC-31 | The configured fifth credential failure locks the account.                     |
-| SEC-32 | A lock remains at 14:59 and ends exactly at 15:00 under the fake clock.        |
-| SEC-33 | Correct credentials cannot bypass a live account lock.                         |
-| SEC-34 | Existing, unknown and account-trap logins expose identical refusal envelopes.  |
-| SEC-35 | A successful login resets the prior credential-failure sequence.               |
-| SEC-36 | A fifty-request parallel burst admits at most five credential checks.          |
-| SEC-37 | Login-protection settings enforce their documented database and API ranges.    |
-| SEC-38 | Only an administrator can clear an account lock, and the action is audited.    |
-| SEC-39 | A temporary account lock never changes the administrator block flag.           |
-| SEC-40 | Missing login CAPTCHA stops before password verification or account counting.  |
-| SEC-41 | Wrong, expired and reused login challenges count only against the address.     |
-| SEC-42 | Turnstile binds success to action, hostname and the 120-second lifetime.       |
-| SEC-43 | Turnstile outage returns 503 before any credential verification.               |
-| SEC-44 | Password CAPTCHA refusal leaves the hash and history byte-identical.           |
-| SEC-45 | A successful password-change token cannot be replayed.                         |
-| SEC-46 | An internal challenge is consumed by the first answer, right or wrong.         |
-| SEC-47 | The internal challenge passes at 119 seconds and fails at 121 seconds.         |
-| SEC-48 | Original-order text fails while its reversed form succeeds.                    |
-| SEC-49 | A filled login honeypot returns the generic 401 and counts only by address.    |
-| SEC-50 | Empty/absent honeypots pass; the off-screen field is inaccessible to users.    |
-| SEC-51 | Account-trap triggers are stored, externally alerted once, and deduplicated.   |
-| SEC-52 | The account-trap login is reserved case-insensitively and has no user row.     |
-| SEC-53 | The AWS decoy returns only planted values and records one aggregated alert.    |
-| SEC-54 | A failed or hanging alert channel cannot delay or fail the triggering request. |
-| SEC-55 | Twenty failures from one address cause the next login to be IP-blocked.        |
-| SEC-56 | Rotating the untrusted left side of X-Forwarded-For cannot evade that block.   |
-| SEC-57 | Eight distinct login failures from one address raise a spraying event.         |
-| SEC-58 | Only administrators list, filter and acknowledge redacted security events.     |
-| SEC-59 | Account and address locks remain active after reopening the SQLite database.   |
-| SEC-60 | Repeated current-password failures lock password change and revoke sessions.   |
-| SEC-61 | The bot simulator refuses an external target without two explicit consents.    |
-| SEC-62 | Production startup rejects dummy keys and every test-only CAPTCHA bypass.      |
-| SEC-63 | Each login outcome records its action, result, client address and UTC time.    |
-| SEC-64 | Authentication refusals store fixed reasons and keep the original responses.   |
-| SEC-65 | Failed credentials store a known login or a keyed reference for unknown input. |
-| SEC-66 | Audit descriptions stay fixed and stored user text escapes invisible controls.  |
-| SEC-67 | Account lock and trap use record separate events without credential material.  |
-| SEC-68 | Password changes and refusals record fixed codes and keep credentials private. |
-| SEC-69 | Administrator account operations record the actor, target and changed fields.  |
-| SEC-70 | One settings audit entry records both changes in the settings transaction.       |
-| SEC-71 | Route denials record the actor and reason. Anonymous 401s create no entry.        |
-| SEC-72 | A rolled-back state change also rolls back the audit entry written with it.     |
-| SEC-73 | An audit write failure aborts login and user creation with `AUDIT_UNAVAILABLE`.  |
-| SEC-74 | 50 concurrent appends across connections produce one gapless hash chain.        |
-| SEC-75 | Independent hashing reproduces stored hashes from the zero-filled genesis.       |
-| SEC-76 | SQLite aborts audit log updates, deletes and replacements.                       |
-| SEC-79 | The audit read API limits access and filters and pages by sequence.              |
-| SEC-80 | CSV and JSON Lines exports contain the selected rows and their hashes.          |
-| SEC-81 | Viewing is throttled per session and exports are recorded before streaming.    |
+| ID     | Proof in the automated suite                                                                               |
+| ------ | ---------------------------------------------------------------------------------------------------------- |
+| SEC-01 | Unknown login receives the generic invalid-credentials result.                                             |
+| SEC-02 | A known login with the wrong password receives the identical result.                                       |
+| SEC-03 | Passwords are stored as salted Argon2id PHC strings, never plaintext.                                      |
+| SEC-04 | A temporary credential opens only an initial-password-change session.                                      |
+| SEC-05 | That restricted session cannot call the administrator API.                                                 |
+| SEC-06 | A temporary password remains valid immediately before twelve hours.                                        |
+| SEC-07 | It expires at exactly twelve hours under the fake clock.                                                   |
+| SEC-08 | One thousand generated temporary passwords meet the 16-character format.                                   |
+| SEC-09 | Eleven characters are below the regular-password minimum.                                                  |
+| SEC-10 | Twelve characters satisfy the length boundary.                                                             |
+| SEC-11 | Case-varied personal data is rejected when the setting is enabled.                                         |
+| SEC-12 | The same personal-data match is allowed when the setting is disabled.                                      |
+| SEC-13 | A wrong current password changes no credential state.                                                      |
+| SEC-14 | The current and last five password hashes cannot be reused.                                                |
+| SEC-15 | A Guest receives 403 from every administrator route.                                                       |
+| SEC-16 | An anonymous caller receives 401 from every administrator route.                                           |
+| SEC-17 | An unreadable ticket is indistinguishable from a missing ticket.                                           |
+| SEC-18 | Blocking an account revokes its live sessions.                                                             |
+| SEC-19 | Soft-deleting an account revokes its live sessions.                                                        |
+| SEC-20 | Resetting a password revokes sessions and the old credential.                                              |
+| SEC-21 | Logout invalidates the copied old cookie.                                                                  |
+| SEC-22 | The backend revokes an idle-expired session.                                                               |
+| SEC-23 | A changed idle timeout applies to an already-open session.                                                 |
+| SEC-24 | Foreign origins and missing or incorrect XSRF tokens cannot run a mutation.                                |
+| SEC-25 | SQL-looking input is data; parser failures and internal failures stay generic.                             |
+| SEC-26 | HTML-looking ticket text renders as text without creating executable markup.                               |
+| SEC-27 | The sixth failure is throttled identically for known and unknown logins.                                   |
+| SEC-28 | Strict update schemas reject hidden privileged fields.                                                     |
+| SEC-29 | Direct mutations of the protected ADMIN account are rejected.                                              |
+| SEC-30 | An unexpired server-side session survives reopening the persistent database.                               |
+| SEC-31 | The configured fifth credential failure locks the account.                                                 |
+| SEC-32 | A lock remains at 14:59 and ends exactly at 15:00 under the fake clock.                                    |
+| SEC-33 | Correct credentials cannot bypass a live account lock.                                                     |
+| SEC-34 | Existing, unknown and account-trap logins expose identical refusal envelopes.                              |
+| SEC-35 | A successful login resets the prior credential-failure sequence.                                           |
+| SEC-36 | A fifty-request parallel burst admits at most five credential checks.                                      |
+| SEC-37 | Login-protection settings enforce their documented database and API ranges.                                |
+| SEC-38 | Only an administrator can clear an account lock, and the action is audited.                                |
+| SEC-39 | A temporary account lock never changes the administrator block flag.                                       |
+| SEC-40 | Missing login CAPTCHA stops before password verification or account counting.                              |
+| SEC-41 | Wrong, expired and reused login challenges count only against the address.                                 |
+| SEC-42 | Turnstile binds success to action, hostname and the 120-second lifetime.                                   |
+| SEC-43 | Turnstile outage returns 503 before any credential verification.                                           |
+| SEC-44 | Password CAPTCHA refusal leaves the hash and history byte-identical.                                       |
+| SEC-45 | A successful password-change token cannot be replayed.                                                     |
+| SEC-46 | An internal challenge is consumed by the first answer, right or wrong.                                     |
+| SEC-47 | The internal challenge passes at 119 seconds and fails at 121 seconds.                                     |
+| SEC-48 | Original-order text fails while its reversed form succeeds.                                                |
+| SEC-49 | A filled login honeypot returns the generic 401 and counts only by address.                                |
+| SEC-50 | Empty/absent honeypots pass; the off-screen field is inaccessible to users.                                |
+| SEC-51 | Account-trap triggers are stored, externally alerted once, and deduplicated.                               |
+| SEC-52 | The account-trap login is reserved case-insensitively and has no user row.                                 |
+| SEC-53 | The AWS decoy returns only planted values and records one aggregated alert.                                |
+| SEC-54 | A failed or hanging alert channel cannot delay or fail the triggering request.                             |
+| SEC-55 | Twenty failures from one address cause the next login to be IP-blocked.                                    |
+| SEC-56 | Rotating the untrusted left side of X-Forwarded-For cannot evade that block.                               |
+| SEC-57 | Eight distinct login failures from one address raise a spraying event.                                     |
+| SEC-58 | Only administrators list, filter and acknowledge redacted security events.                                 |
+| SEC-59 | Account and address locks remain active after reopening the SQLite database.                               |
+| SEC-60 | Repeated current-password failures lock password change and revoke sessions.                               |
+| SEC-61 | The bot simulator refuses an external target without two explicit consents.                                |
+| SEC-62 | Production startup rejects dummy keys and every test-only CAPTCHA bypass.                                  |
+| SEC-63 | Each login outcome records its action, result, client address and UTC time.                                |
+| SEC-64 | Authentication refusals store fixed reasons and keep the original responses.                               |
+| SEC-65 | Failed credentials store a known login or a keyed reference for unknown input.                             |
+| SEC-66 | Audit descriptions stay fixed and stored user text escapes invisible controls.                             |
+| SEC-67 | Account lock and trap use record separate events without credential material.                              |
+| SEC-68 | Password changes and refusals record fixed codes and keep credentials private.                             |
+| SEC-69 | Administrator account operations record the actor, target and changed fields.                              |
+| SEC-70 | One settings audit entry records both changes in the settings transaction.                                 |
+| SEC-71 | Route denials record the actor and reason. Anonymous 401s create no entry.                                 |
+| SEC-72 | A rolled-back state change also rolls back the audit entry written with it.                                |
+| SEC-73 | An audit write failure aborts login and user creation with `AUDIT_UNAVAILABLE`.                            |
+| SEC-74 | 50 concurrent appends across connections produce one gapless hash chain.                                   |
+| SEC-75 | Independent hashing reproduces stored hashes from the zero-filled genesis.                                 |
+| SEC-76 | SQLite aborts audit log updates, deletes and replacements.                                                 |
+| SEC-77 | Audit routes, settings validation and SQL lint reject mutation and disable controls.                       |
+| SEC-78 | A purge ten years later preserves every original audit entry.                                              |
+| SEC-79 | The audit read API limits access and filters and pages by sequence.                                        |
+| SEC-80 | CSV and JSON Lines exports contain the selected rows and their hashes.                                     |
+| SEC-81 | Views are throttled, exports are recorded before streaming, and verification runs are recorded afterwards. |
+| SEC-82 | An intact log verifies with the correct count and the administrator can see the result.                    |
+| SEC-83 | Verification identifies a changed field and the administrator can open the affected row.                   |
+| SEC-84 | Deleting a middle entry is detected at the first sequence after the gap.                                   |
+| SEC-85 | Deleting the anchored tail produces `HEAD_MISMATCH`.                                                       |
+| SEC-86 | The head anchor detects a rewritten log even when its row hashes agree.                                    |
+| SEC-87 | A due verification records tampering and sends one critical alert for an unchanged finding.                |
+| SEC-88 | Five failures on one subject within five minutes raise a warning.                                          |
+| SEC-89 | Lock refusals count toward the burst after three wrong credentials.                                        |
+| SEC-90 | A login after three recent credential failures raises one critical alert.                                  |
+| SEC-91 | The audit entry, security event and alert file share one alert ID.                                         |
+| SEC-92 | An unwritable alert file preserves the security event and the original response. Served paths are refused. |
+| SEC-93 | The rule and subject cooldown persists when the database is reopened.                                      |
+| SEC-94 | Optional Canarytokens receiver authenticates, validates, deduplicates and suppresses outbound delivery.    |
+| SEC-95 | Optional Loki shipper preserves order and hashes, and resumes after a stubbed outage.                      |
+| SEC-96 | Browser verification names a changed fixture row and reports an intact chain after restoration.            |
 
 API tests invoke the exported Next.js route handlers with real `Request` objects and the cookie
 jar in `tests/helpers/api-client.ts`; no Angular code is involved. Database fixtures create an
@@ -120,10 +137,24 @@ TOTP setup, Module 2 operational records, and ticket workflow changes.
 
 Two temporary mutations were observed to fail and were then reverted.
 
-| Temporary mutation | Observed failure |
-| --- | --- |
-| Add a `POST` handler named `audit.coverage.unregistered_probe` | The registry check reports the route and its missing audit coverage decision. |
-| Remove the `SETTINGS_CHANGED` append | The settings request succeeds and its coverage case fails because the required entry is absent. |
+| Temporary mutation                                             | Observed failure                                                                                |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Add a `POST` handler named `audit.coverage.unregistered_probe` | The registry check reports the route and its missing audit coverage decision.                   |
+| Remove the `SETTINGS_CHANGED` append                           | The settings request succeeds and its coverage case fails because the required entry is absent. |
+
+### Module 3 mutation sanity check (SD-90)
+
+Each baseline passed before the corresponding mutation. The five independent changes were made
+in a disposable source snapshot. The original workspace, migrations and development database
+were preserved.
+
+| Mutation                                                   | Failing test                                                                                  |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Swap the ID and occurrence time in the hash input          | `append.test.ts` SEC-75 independent hash mismatch                                             |
+| Remove the update trigger from the test migration          | `audit-log.test.ts` SEC-76 expected SQLite abort                                              |
+| Change rule 1 threshold from ≥ 5 to > 5                    | `engine.test.ts` SEC-88 expects the fifth failure to alert                                    |
+| Change rule 2 threshold from ≥ 3 to > 3                    | `engine.test.ts` SEC-90 expects the successful login to alert                                 |
+| Remove the rule 1 reason predicate from the counting query | `engine.test.ts` SEC-88 expects four credential failures plus CAPTCHA to stay below threshold |
 
 ## TOTP extra-credit coverage
 
@@ -220,3 +251,14 @@ development database. The session-restart case deliberately closes and reopens i
 No automated test waits for wall-clock time: unit boundaries use `FakeClock`, and the browser idle
 journey backdates only its active row in the isolated E2E database before exercising the real
 server-side expiry path.
+
+### Module 3 browser release checks (SD-91)
+
+Run `npm run test:e2e:module3` three times. Each invocation creates its own temporary SQLite
+fixture and runs with retries disabled. Use `-- --evidence` to publish the eight screenshots
+from a successful run. The audit spec checks generated entries, both downloads and the audit
+entry for each export. The integrity spec waits for each manual verification, checks the
+affected row and verifies again after restoring the row and trigger. The detection spec follows
+both rules through delivery, the critical banner, acknowledgement and remediation. It matches
+the critical alert ID in the JSON Lines file and the audit drawer. None of these tests sleep to
+simulate a security timeout.

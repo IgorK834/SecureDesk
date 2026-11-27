@@ -126,7 +126,7 @@ jako maksimum bezpieczeństwa [1][2].
 
 ## 2.4. Schemat ER
 
-![Schemat encji i relacji SecureDesk](report-evidence/er-diagram.png)
+![Schemat encji i relacji SecureDesk](../report-evidence/er-diagram.png)
 
 Najważniejsze relacje są proste i wymuszane kluczami obcymi. Użytkownik ma jedną rolę, a relacja
 wiele-do-wielu `role_permissions` łączy role z kodami uprawnień. Historia i sesje należą do
@@ -299,14 +299,14 @@ return await handler(context);
 
 ## 3.1. Błędne logowanie
 
-![Neutralny komunikat błędnego logowania](report-evidence/01-failed-login.png)
+![Neutralny komunikat błędnego logowania](../report-evidence/01-failed-login.png)
 
 Playwright wysyła osobno złe hasło dla znanego loginu i hasło dla nieznanego loginu. Oba przypadki
 pokazują dokładnie `Login lub hasło niepoprawne`. Dowód nie pozwala rozpoznać, czy konto istnieje.
 
 ## 3.2. Wymuszona zmiana hasła
 
-![Ekran wymuszonej zmiany hasła](report-evidence/02-forced-password-change.png)
+![Ekran wymuszonej zmiany hasła](../report-evidence/02-forced-password-change.png)
 
 Administrator utworzył Employee, a jego pierwsze logowanie zakończyło się etapem
 `INITIAL_PASSWORD_CHANGE`. Próba wejścia na pulpit nie omija ograniczenia. Pola hasła są maskowane na
@@ -314,7 +314,7 @@ zrzucie, a po sukcesie formularz jest zerowany i sesja obracana.
 
 ## 3.3. Hasze w bazie
 
-![Skrócone wartości Argon2id w bazie E2E](report-evidence/03-hash-in-database.png)
+![Skrócone wartości Argon2id w bazie E2E](../report-evidence/03-hash-in-database.png)
 
 Skrypt odczytuje izolowaną bazę i pokazuje jedynie obcięte prefiksy PHC. Widoczny jest
 `$argon2id$v=19$` oraz różne sole. Obcięcie uniemożliwia wykorzystanie dowodu jako weryfikatora, a
@@ -322,20 +322,20 @@ brak tekstu jawnego potwierdza model przechowywania.
 
 ## 3.4. Panel administratora
 
-![Lista użytkowników administratora](report-evidence/04-admin-users.png)
+![Lista użytkowników administratora](../report-evidence/04-admin-users.png)
 
 Lista pokazuje status i rolę oraz prowadzi do tworzenia, edycji, blokady, usunięcia i resetu hasła.
 Działania destrukcyjne wymagają jawnego potwierdzenia. Operacje chronionego `ADMIN` są wyłączone w UI
 i niezależnie od tego odrzucane przez API.
 
-![Ustawienia bezpieczeństwa administratora](report-evidence/04b-admin-security-settings.png)
+![Ustawienia bezpieczeństwa administratora](../report-evidence/04b-admin-security-settings.png)
 
 Formularz zapisuje minimalną długość, regułę danych osobowych, ważność haseł i timeout bezczynności.
 Po odświeżeniu wartości pochodzą z serwera. Walidacja API pozostaje autorytatywna.
 
 ## 3.5. Jednorazowe hasło tymczasowe
 
-![Dialog jednorazowego hasła tymczasowego](report-evidence/05-temporary-password-reveal.png)
+![Dialog jednorazowego hasła tymczasowego](../report-evidence/05-temporary-password-reveal.png)
 
 Dialog pokazuje 16-znakową wartość tylko bezpośrednio po utworzeniu lub resecie. Na dowodzie pole jest
 zamaskowane. Po zamknięciu sygnał komponentu jest czyszczony, ponowne otwarcie rekordu nie pokazuje
@@ -343,7 +343,7 @@ wartości, a test sprawdza DOM, URL oraz oba Web Storage.
 
 ## 3.6. HTTP 403 dla Guest
 
-![Rzeczywista odpowiedź HTTP 403](report-evidence/06-http-403-guest-admin-api.png)
+![Rzeczywista odpowiedź HTTP 403](../report-evidence/06-http-403-guest-admin-api.png)
 
 To nie jest przekierowanie UI. Test loguje prawidłowego Guest i z tego samego kontekstu przeglądarki
 wykonuje `GET /api/admin/users`. API rozpoznaje sesję, stwierdza brak `users:read` i zwraca 403 bez
@@ -351,7 +351,7 @@ danych listy. Cookie i token XSRF nie są wyświetlone.
 
 ## 3.7. Wylogowanie po bezczynności
 
-![Neutralny komunikat po wygaśnięciu bezczynności](report-evidence/07-idle-logout.png)
+![Neutralny komunikat po wygaśnięciu bezczynności](../report-evidence/07-idle-logout.png)
 
 Test ustawia timeout na minutę, czeka około 65 sekund i dopiero wtedy wykonuje akcję. To następne
 żądanie dostaje 401, stan klienta jest czyszczony, a login pokazuje neutralny komunikat. Frontend nie
