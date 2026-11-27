@@ -1,0 +1,27 @@
+name: Security hardening
+description: A defence-in-depth idea that is not an active vulnerability
+labels: [security]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for improvements such as a missing header, a stricter limit or a better default.
+        If you can exploit something today, report it privately instead (see SECURITY.md).
+  - type: textarea
+    id: weakness
+    attributes:
+      label: Weakness or gap
+      description: What is missing or weaker than it should be?
+    validations:
+      required: true
+  - type: textarea
+    id: threat
+    attributes:
+      label: Threat addressed
+      description: Who would abuse it and how. Link the relevant row of docs/threat-model.md if there is one.
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed control and how to test it
+    validations:
+      required: true

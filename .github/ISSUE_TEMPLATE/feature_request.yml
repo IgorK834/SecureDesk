@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a new capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or goal
+      description: What are you trying to achieve, and who needs it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: Which roles may use it, what data it touches, how it could be abused.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
