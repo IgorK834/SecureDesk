@@ -72,12 +72,14 @@ function newSession(userId: string, overrides: Partial<typeof sessions.$inferIns
 }
 
 describe('migrated schema', () => {
-  it('contains the core, ticket, abuse-defence and audit tables', () => {
+  it('contains the core, ticket, abuse-defence, audit and observability tables', () => {
     expect(tableNames()).toEqual([
       'audit_log',
+      'canary_webhook_receipts',
       'captcha_challenges',
       'honeytokens',
       'login_attempts',
+      'loki_ship_cursor',
       'password_history',
       'permissions',
       'role_permissions',
@@ -213,6 +215,9 @@ describe('no plaintext credentials can be stored', () => {
     'login_attempts.ip_key',
     'security_events.ip_key',
     'security_events.honeytoken_id',
+    // A keyed replay fingerprint and the hash of an acknowledged audit row are metadata.
+    'canary_webhook_receipts.digest',
+    'loki_ship_cursor.last_hash',
     'captcha_challenges.ip_key',
     // Audit row digests describe chain integrity.
     'audit_log.prev_hash',

@@ -27,6 +27,7 @@ export const auditLog = sqliteTable(
     index('audit_log_action_occurred_at_idx').on(t.action, t.occurredAt),
     index('audit_log_actor_user_id_occurred_at_idx').on(t.actorUserId, t.occurredAt),
     index('audit_log_subject_login_occurred_at_idx').on(t.subjectLogin, t.occurredAt),
+    index('audit_log_subject_login_action_seq_idx').on(t.subjectLogin, t.action, t.seq),
     index('audit_log_subject_ref_occurred_at_idx').on(t.subjectRef, t.occurredAt),
     check('audit_log_actor_type_check', sql`${t.actorType} IN ('USER', 'ANONYMOUS', 'SYSTEM')`),
     check('audit_log_outcome_check', sql`${t.outcome} IN ('SUCCESS', 'FAILURE')`),

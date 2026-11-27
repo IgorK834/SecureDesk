@@ -57,6 +57,20 @@
       "when": 1795699345727,
       "tag": "0007_protect_audit_log",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795726565867,
+      "tag": "0008_detection_subject_seq",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1795730429765,
+      "tag": "0009_observability_state",
+      "breakpoints": true
     }
   ]
 }
