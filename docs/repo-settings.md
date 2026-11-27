@@ -48,15 +48,22 @@ pattern `main`:
 | Allow force pushes, Allow deletions                              | Off                                                        |
 
 Required status checks are added as the pipelines land; the names are the job names of the
-workflows (see the CI tasks in [the Module 4 backlog](course/backlog-module-4.md)):
+workflows (see the CI tasks in [the Module 4 backlog](course/backlog-module-4.md)). Search for
+the job name in the **Status checks that are required** box (for example `lint`; the list shows
+them as `CI / lint`):
 
-| Check                                                      | Added with              | Workflow                    |
-| ---------------------------------------------------------- | ----------------------- | --------------------------- |
-| `lint`, `typecheck`, `format`, `test`, `links`, `adr-lint` | CI workflow (SD-97)     | `.github/workflows/ci.yml`  |
-| `e2e`                                                      | E2E in CI (SD-98)       | `.github/workflows/ci.yml`  |
-| `CodeQL`, `gitleaks`                                       | Static analysis (SD-99) | `codeql.yml`, `secrets.yml` |
+| Check                                                      | Added with              | Workflow                    | Status            |
+| ---------------------------------------------------------- | ----------------------- | --------------------------- | ----------------- |
+| `lint`, `typecheck`, `format`, `test`, `links`, `adr-lint` | CI workflow (SD-97)     | `.github/workflows/ci.yml`  | In the repository |
+| `e2e`                                                      | E2E in CI (SD-98)       | `.github/workflows/ci.yml`  | Not built yet     |
+| `CodeQL`, `gitleaks`                                       | Static analysis (SD-99) | `codeql.yml`, `secrets.yml` | Not built yet     |
 
-A check can only be marked required after it has run once on the repository.
+A check can only be marked required after it has run once on the repository, so mark the six CI
+checks after the first run of the workflow, from this pull request or from `main`.
+
+The `test` job also publishes the coverage totals in the run summary and uploads the full report
+as the `coverage` artifact (kept 14 days). Coverage is enforced by the 80% gate inside
+`npm test`, not by a badge.
 
 ## Code security and analysis
 

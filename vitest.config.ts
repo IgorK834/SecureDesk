@@ -60,6 +60,7 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
+      reporter: ['text', 'json-summary', 'html'],
       include: [
         'apps/backend/src/**/*.ts',
         'apps/backend/scripts/audit-tamper-demo/demo.ts',

@@ -1,5 +1,6 @@
 # SecureDesk
 
+[![CI](https://github.com/IgorK834/SecureDesk/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/IgorK834/SecureDesk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js 24](https://img.shields.io/badge/node-24-339933.svg)](.nvmrc)
 
