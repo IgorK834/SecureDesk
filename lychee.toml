@@ -1,5 +1,5 @@
 # Link check used by the `links` job of .github/workflows/ci.yml.
 # Offline: verify local files and `#anchor` fragments only; never fetch external URLs.
 offline = true
-include_fragments = true
+include_fragments = "full"
 no_progress = true
