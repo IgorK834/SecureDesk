@@ -133,7 +133,8 @@ TypeScript, npm workspaces, ESLint, Prettier, Vitest and Playwright. Contributin
 ## Documentation
 
 - [Running, building and testing](docs/running.md) and [demonstrations](docs/demos.md)
-- [Architecture and security design](docs/architecture.md), [threat model](docs/threat-model.md)
+- [Architecture and security design](docs/architecture.md), [threat model](docs/threat-model.md),
+  [architecture decision records](docs/adr/README.md)
 - [Database schema](docs/database-schema.md), [permission matrix](docs/permissions.md)
 - [Test traceability](docs/testing.md), [report evidence](docs/report-evidence/README.md)
 - [Audit log runbook](docs/audit-log.md), [Canarytokens](docs/canarytokens.md), [Loki](docs/loki.md)
