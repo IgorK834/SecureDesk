@@ -1,0 +1,16 @@
+name: Set up Node.js
+description: Install the Node.js version from .nvmrc and, optionally, the locked npm dependencies.
+inputs:
+  install:
+    description: Run `npm ci` (and cache the npm download cache). Use "false" for jobs that need only Node.
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .nvmrc
+        cache: ${{ inputs.install == 'true' && 'npm' || '' }}
+    - if: inputs.install == 'true'
+      shell: bash
+      run: npm ci

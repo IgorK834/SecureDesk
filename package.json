@@ -22,6 +22,7 @@
     "test:e2e:module3": "node scripts/test-module3-e2e.mjs",
     "test:e2e:module2": "playwright test tests/e2e/lockout.spec.ts tests/e2e/captcha-login.spec.ts tests/e2e/captcha-password-change.spec.ts tests/e2e/honeypot.spec.ts tests/e2e/honeytoken.spec.ts tests/e2e/bot-sim.spec.ts tests/e2e/security-events.spec.ts",
     "check:sec-traceability": "node --experimental-strip-types scripts/check-sec-traceability.ts",
+    "check:adr": "node --experimental-strip-types scripts/check-adr.ts",
     "check:readme-controls": "node --experimental-strip-types scripts/readme-controls.ts --check",
     "readme:controls": "node --experimental-strip-types scripts/readme-controls.ts",
     "check:image-locations": "node --experimental-strip-types scripts/check-image-locations.ts",

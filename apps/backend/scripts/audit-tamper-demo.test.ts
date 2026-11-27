@@ -123,7 +123,8 @@ describe('audit tamper demo', () => {
       env,
       encoding: 'utf8',
     });
-    expect(cli.stderr).toBe('');
+    // Without a root .env file (a fresh clone, CI) Node reports that it is continuing without it.
+    expect(cli.stderr.replaceAll(/^.*\.env not found\. Continuing without it\.\n/gm, '')).toBe('');
     expect(cli.status).toBe(0);
     for (const text of verificationOutput) expect(cli.stdout).toContain(text);
 
