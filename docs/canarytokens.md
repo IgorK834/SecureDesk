@@ -118,3 +118,31 @@ redacted e-mails. This keeps the report factual rather than assuming the provide
 
 The CI checks scan repository text for hosted-token URL literals and AWS-access-key-looking values.
 They deliberately skip local `.env` files and never print a matched secret value.
+
+## 6. Receive Canarytokens alerts
+
+Set `CANARYTOKENS_WEBHOOK_SECRET` to a separate random value in the backend environment. A
+32-byte hex value generated with `openssl rand -hex 32` works as a single URL segment. Apply
+the database migrations and restart the backend.
+
+In Canarytokens, append `/api/webhooks/canarytokens/<path-secret>` to your SecureDesk HTTPS
+origin and use the result as the token's webhook notification URL. Set its reminder to
+`securedesk:account-trap-backup-admin` for the seeded account trap. For another registered
+honeytoken, use `securedesk:<id>` with its ID from the SecureDesk honeytoken list.
+
+Canarytokens needs a publicly reachable HTTPS URL. For a local instance, a tunnel such as
+Cloudflare Tunnel can forward the webhook path to the backend port. Restrict the public route
+to the webhook and omit the incoming path from reverse-proxy or tunnel access logs. The path
+contains the credential. SecureDesk's application logs use the route name and request ID,
+and Next.js incoming request logging is disabled while the webhook secret is configured.
+
+The endpoint accepts the generic JSON notification. It validates the memo and event time
+and discards additional fields before recording. The provider's setup probe also receives
+`204` and creates no incident. An accepted alert appears as a critical honeytoken event in
+**Security events**. SecureDesk suppresses outbound delivery for incoming Canarytokens events
+to avoid a notification loop. Identical deliveries are acknowledged without another incident
+for five minutes. The endpoint limits authenticated traffic to 60 requests per minute and caps
+JSON bodies at 16 KiB.
+
+The automated tests use local fixtures and a stub dispatcher. Thinkst defines the generic webhook
+envelope and the setup probe in `webhook_formatting.py` and sends them in `channel_output_webhook.py`.
