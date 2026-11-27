@@ -66,7 +66,7 @@ export function appendAuditEntry(
         entryHash: computeEntryHash(prevHash, canonicalize(content)),
       };
       tx.insert(auditLog).values(row).run();
-      markAuditAppended(tx);
+      markAuditAppended(tx, row);
       return row;
     },
     { behavior: 'immediate' },
