@@ -49,3 +49,38 @@ describe('SQL construction lint guard (SEC-25)', () => {
     ).toStrictEqual([]);
   });
 });
+
+describe('SEC-77 audit log mutation lint guard', () => {
+  it.each([
+    'db.delete(auditLog).run();',
+    'db.update(auditLog).set({ outcome: "SUCCESS" }).run();',
+    'db["delete"](auditLog).run();',
+    'db.update(schema.auditLog).run();',
+    'sql`DELETE FROM ${auditLog}`;',
+    'db.prepare("update OR ABORT main.[audit_log] SET outcome = ?");',
+    'db.exec(`WITH scope AS (SELECT 1)\nDELETE /* SQL comment */ FROM "audit_log"`);',
+  ])('flags %s in application code', async (source) => {
+    const messages = await securityMessages(source);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.message).toMatch(/audit_log is append-only/);
+  });
+
+  it.each([
+    'src/server/db/migrations/example.ts',
+    'scripts/audit-tamper-demo/probes.ts',
+    'src/server/audit/example.test.ts',
+  ])('permits an intentional probe in %s', async (file) => {
+    expect(await securityMessages('db.exec("DELETE FROM audit_log");', file)).toEqual([]);
+  });
+
+  it('permits appends, reads and writes to unrelated tables', async () => {
+    expect(
+      await securityMessages(`
+      db.insert(auditLog).run();
+      db.delete(tickets).run();
+      db.exec('SELECT * FROM audit_log');
+      db.exec('DELETE FROM audit_log_archive');
+    `),
+    ).toEqual([]);
+  });
+});

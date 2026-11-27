@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { getRouteMeta } from '../apps/backend/src/server/http/route-handler';
+import { defineRoute, getRouteMeta } from '../apps/backend/src/server/http/route-handler';
 import { type ExportedHandler, loadRoutes } from './helpers/route-scanner';
 
 // The guardrail behind "deny by default": authorization lives in `defineRoute`, so the way to
@@ -18,7 +18,10 @@ const PUBLIC_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
   '/api/captcha/config',
   '/api/captcha/challenge',
   '/api/backup/config',
+  '/api/webhooks/canarytokens/[secret]',
 ]);
+
+const WEBHOOK_CSRF_ALLOWLIST = new Set(['POST /api/webhooks/canarytokens/[secret]']);
 
 const isAdminRoute = (route: string) => route === '/api/admin' || route.startsWith('/api/admin/');
 
@@ -35,6 +38,9 @@ function violationsOf(handlers: ExportedHandler[]): string[] {
 
     if (meta.auth === 'public' && !PUBLIC_ROUTE_ALLOWLIST.has(route)) {
       found.push(`${label}: public but not on the allowlist`);
+    }
+    if (meta.csrf === 'webhook' && !WEBHOOK_CSRF_ALLOWLIST.has(label)) {
+      found.push(`${label}: webhook CSRF exemption is not on the allowlist`);
     }
     if (isAdminRoute(route)) {
       const permission = meta.auth === 'public' ? undefined : meta.auth.permission;
@@ -81,13 +87,38 @@ describe('route guard conformance: the real API', () => {
       '/api/captcha/challenge',
       '/api/captcha/config',
       '/api/health',
+      '/api/webhooks/canarytokens/[secret]',
     ]);
+  });
+
+  it('SEC-94 finds precisely the reviewed webhook CSRF exemption', async () => {
+    const routes = await loadRoutes(API_ROOT);
+    expect(
+      routes
+        .filter(({ handler }) => getRouteMeta(handler)?.csrf === 'webhook')
+        .map(({ method, route }) => method + ' ' + route),
+    ).toEqual([...WEBHOOK_CSRF_ALLOWLIST]);
   });
 });
 
 // The scan is only worth anything if it can fail. These routes break each rule on purpose
 // (see tests/fixtures/conformance); the scan must name every one and accept the conforming two.
 describe('route guard conformance: the scan itself', () => {
+  it('SEC-94 rejects a second CSRF exemption and requires a webhook authentication check', () => {
+    const options = {
+      name: 'fixture.other',
+      auth: 'public',
+      csrf: 'webhook',
+      handler: () => new Response(),
+    } as const;
+    const handler = defineRoute({ ...options, authenticateWebhook: () => undefined });
+    expect(violationsOf([{ route: '/api/auth/login', method: 'POST', handler }])).toEqual([
+      'POST /api/auth/login: webhook CSRF exemption is not on the allowlist',
+    ]);
+    expect(() => defineRoute(options as Parameters<typeof defineRoute>[0])).toThrow(
+      /authentication check/,
+    );
+  });
   it('flags a route written without defineRoute, an unlisted public route and an admin route without a permission', async () => {
     expect(violationsOf(await loadRoutes(FIXTURES_ROOT))).toEqual([
       'GET /api/admin/open: admin route without a permission',

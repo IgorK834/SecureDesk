@@ -8,6 +8,10 @@ const commonEnv = {
   ...process.env,
   APP_ORIGIN: 'http://localhost:4200',
   E2E_DATABASE_PATH: databasePath,
+  AUDIT_ANCHOR_PATH: '',
+  ALERT_FILE_PATH: '',
+  LOKI_PUSH_URL: '',
+  CANARYTOKENS_WEBHOOK_SECRET: '',
   CSRF_SECRET: 'e2e-only-csrf-secret-with-at-least-32-bytes',
   TOTP_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString('base64'),
   COOKIE_SECURE: 'false',
@@ -23,6 +27,7 @@ const commonEnv = {
   CAPTCHA_EXPECTED_HOSTNAME: 'localhost',
   TURNSTILE_VERIFY_URL: 'http://127.0.0.1:3100/siteverify',
   CANARY_ALERTS_ENABLED: 'false',
+  ALERT_WEBHOOK_URL: '',
 };
 
 export default defineConfig({
