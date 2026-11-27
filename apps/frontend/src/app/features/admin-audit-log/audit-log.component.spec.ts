@@ -3,9 +3,11 @@ import '../../__fixtures__/test-environment';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { BehaviorSubject } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthService } from '../../core/auth/auth.service';
-import type { AuditEntry, AuditPage } from '../../core/http/admin-api.service';
+import type { AuditEntry, AuditPage, AuditVerification } from '../../core/http/admin-api.service';
 import { AuditLogComponent } from './audit-log.component';
 
 const URL = '/api/admin/audit-log';
@@ -32,17 +34,21 @@ const page: AuditPage = {
   actions: ['AUTH_LOGIN_SUCCESS', 'AUTH_LOGIN_FAILURE'],
 };
 
-function setup(canExport = true) {
+function setup(canManage = true, verification: AuditVerification | null = null, range = {}) {
+  const queryParamMap = new BehaviorSubject(convertToParamMap(range));
   TestBed.configureTestingModule({
     providers: [
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: AuthService, useValue: { has: () => canExport } },
+      provideRouter([]),
+      { provide: ActivatedRoute, useValue: { queryParamMap } },
+      { provide: AuthService, useValue: { has: () => canManage } },
     ],
   });
   const fixture = TestBed.createComponent(AuditLogComponent);
   const http = TestBed.inject(HttpTestingController);
   fixture.detectChanges();
+  http.expectOne(URL + '/integrity').flush({ verification });
   const root = fixture.nativeElement as HTMLElement;
   const list = () => http.expectOne((request) => request.url === URL && request.method === 'GET');
   const text = () => root.textContent ?? '';
@@ -72,17 +78,138 @@ function setup(canExport = true) {
     submit,
     click,
     fixture,
+    queryParamMap,
     render: () => fixture.detectChanges(),
   };
 }
 
 afterEach(() => {
+  const http = TestBed.inject(HttpTestingController);
+  for (const request of http.match('/api/admin/detection-rules')) request.flush({ items: [] });
   TestBed.inject(HttpTestingController).verify();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe('AuditLogComponent', () => {
+  const verifiedAt = '2026-11-26T09:15:00.123Z';
+
+  it('shows detection thresholds, UTC last alert times, and loads the linked sequence range', () => {
+    const t = setup(true, null, { fromSeq: '12', toSeq: '16' });
+    const request = t.list();
+    expect(request.request.params.get('fromSeq')).toBe('12');
+    expect(request.request.params.get('toSeq')).toBe('16');
+    request.flush(page);
+    t.http.expectOne('/api/admin/detection-rules').flush({
+      items: [
+        {
+          id: 'BURST',
+          title: 'Burst of failed logins',
+          threshold: 5,
+          windowMinutes: 5,
+          severity: 'WARNING',
+          lastAlertAt: null,
+        },
+        {
+          id: 'SUCCESS',
+          title: 'Successful login after failed attempts',
+          threshold: 3,
+          windowMinutes: 10,
+          severity: 'CRITICAL',
+          lastAlertAt: verifiedAt,
+        },
+      ],
+    });
+    t.render();
+    expect(t.text()).toContain('5 failures in 5 minutes');
+    expect(t.text()).toContain('3 failures in 10 minutes');
+    expect(t.text()).toContain('2026-11-26 09:15:00 UTC');
+    expect(t.text()).toContain('Alert entries #12–#16');
+    t.queryParamMap.next(convertToParamMap({}));
+    const reset = t.list();
+    expect(reset.request.params.has('fromSeq')).toBe(false);
+    reset.flush(page);
+  });
+
+  it('reports that detection rules could not be loaded', () => {
+    const t = setup();
+    t.list().flush(page);
+    t.http.expectOne('/api/admin/detection-rules').flush({}, { status: 500, statusText: 'Error' });
+    t.render();
+    expect(t.text()).toContain('Could not load detection rules.');
+  });
+
+  it('announces verification progress and the intact result and prevents a second request', () => {
+    const t = setup();
+    t.list().flush(page);
+    t.render();
+    const panel = t.root.querySelector('[aria-live="polite"][role="status"]')!;
+    expect(panel.textContent).toContain('No verification recorded');
+    const button = Array.from(t.root.querySelectorAll('button')).find(
+      ({ textContent }) => textContent?.trim() === 'Verify integrity',
+    )!;
+    button.click();
+    // A second activation can arrive before Angular has rendered the disabled state.
+    button.click();
+    t.render();
+    expect(button.disabled).toBe(true);
+    expect(panel.textContent).toContain('Verification is in progress');
+    const request = t.http.expectOne(URL + '/verify');
+    expect(request.request.method).toBe('POST');
+    request.flush({ status: 'INTACT', checkedEntries: 12, verifiedAt, warnings: [] });
+    t.render();
+    expect(panel.textContent).toContain('Log intact');
+    expect(panel.textContent).toMatch(/12\s+entries checked/);
+    expect(panel.textContent).toContain('2026-11-26 09:15:00 UTC');
+    expect(panel.querySelector('time')?.getAttribute('datetime')).toBe(verifiedAt);
+    expect(button.disabled).toBe(false);
+  });
+
+  it('shows the last problem and filters the table to the affected entry', () => {
+    const t = setup(true, {
+      status: 'TAMPERED',
+      checkedEntries: 12,
+      verifiedAt,
+      warnings: ['ANCHOR_MISSING'],
+      firstProblem: { seq: entry.seq, id: entry.id, kind: 'HASH_MISMATCH' },
+    });
+    t.list().flush(page);
+    t.render();
+    expect(t.text()).toContain('Tampering detected');
+    expect(t.text()).toContain('HASH_MISMATCH');
+    expect(t.text()).toContain('Entry ID id-12');
+    expect(t.text()).toContain('head anchor was missing');
+    t.root.querySelector<HTMLAnchorElement>('a[href="#audit-entries"]')!.click();
+    t.http.expectOne(URL + '/12').flush(entry);
+    t.render();
+    expect(t.text()).toContain('Showing entry #12');
+    expect(t.root.querySelectorAll('tbody tr')).toHaveLength(1);
+    t.click('Clear entry filter');
+    t.list().flush(page);
+    t.render();
+    expect(t.text()).not.toContain('Showing entry #12');
+  });
+
+  it('handles a server conflict and an unavailable verification', () => {
+    const t = setup();
+    t.list().flush(page);
+    t.render();
+    t.click('Verify integrity');
+    t.http.expectOne(URL + '/verify').flush(
+      { error: { code: 'VERIFICATION_IN_PROGRESS' } },
+      {
+        status: 409,
+        statusText: 'Conflict',
+      },
+    );
+    t.render();
+    expect(t.text()).toContain('A verification is already in progress');
+    t.click('Verify integrity');
+    t.http.expectOne(URL + '/verify').flush({}, { status: 500, statusText: 'Unavailable' });
+    t.render();
+    expect(t.text()).toContain('Could not verify the audit log');
+  });
+
   it('loads, applies user/date/action/outcome filters in UTC, replaces rows, and paginates', () => {
     const t = setup();
     expect(t.text()).toContain('Loading audit entries');

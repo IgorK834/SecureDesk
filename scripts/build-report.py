@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build the course report PDF from docs/report.md with ReportLab."""
+"""Build a SecureDesk course report PDF from Markdown with ReportLab."""
 
 from __future__ import annotations
 
+import argparse
 import html
 import re
 from pathlib import Path
@@ -34,7 +35,7 @@ from reportlab.platypus import (
 from reportlab.platypus.tableofcontents import TableOfContents
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "docs" / "report.md"
+SOURCE = ROOT / "docs" / "course" / "report.md"
 OUTPUT = ROOT / "output" / "pdf" / "SecureDesk-raport.pdf"
 
 PAGE_WIDTH, PAGE_HEIGHT = A4
@@ -207,7 +208,7 @@ def inline_markup(text: str) -> str:
 
 
 class ReportDocument(BaseDocTemplate):
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, *, title: str, subject: str):
         super().__init__(
             filename,
             pagesize=A4,
@@ -215,9 +216,9 @@ class ReportDocument(BaseDocTemplate):
             rightMargin=RIGHT,
             topMargin=TOP,
             bottomMargin=BOTTOM,
-            title="SecureDesk - raport z realizacji modułu uwierzytelniania i autoryzacji",
+            title=title,
             author="Igor",
-            subject="Cybersecurity course report, variant 2",
+            subject=subject,
         )
         cover = Frame(LEFT, BOTTOM, CONTENT_WIDTH, PAGE_HEIGHT - TOP - BOTTOM, id="cover")
         body = Frame(LEFT, BOTTOM, CONTENT_WIDTH, PAGE_HEIGHT - TOP - BOTTOM, id="body")
@@ -265,20 +266,24 @@ class ReportDocument(BaseDocTemplate):
         self.notify("TOCEntry", (level, text, self.page, key))
 
 
-def cover_story():
+def cover_story(*, subtitle: str, report_date: str, module: str):
     return [
         Spacer(1, 42 * mm),
         Paragraph("SecureDesk", STYLES["CoverTitle"]),
         Paragraph(
-            "Raport z realizacji modułu<br/>uwierzytelniania i autoryzacji",
+            subtitle.replace(" | ", "<br/>"),
             STYLES["CoverSubtitle"],
         ),
         Spacer(1, 8 * mm),
         Table(
             [
-                ["Wariant", "2"],
+                ["Moduł / wariant", f"{module} / 2"],
                 ["Autor", "Igor"],
-                ["Data", "25.10.2026"],
+                *(
+                    [["Grupa / nr indeksu", "nie podano - uzupełnić przed oddaniem"]]
+                    if module != "3" else []
+                ),
+                ["Data", report_date],
                 ["Repozytorium", "github.com/IgorK834/SecureDesk"],
             ],
             colWidths=[35 * mm, 90 * mm],
@@ -369,27 +374,26 @@ def parse_table(lines: list[str]):
     )
 
 
-def report_image(alt: str, relative: str):
+def report_image(alt: str, relative: str, lead=()):
     path = (SOURCE.parent / relative).resolve()
     with PillowImage.open(path) as source_image:
         width, height = source_image.size
     max_width = CONTENT_WIDTH
-    max_height = 182 * mm
+    max_height = (150 if "module-3/m3-05-" in relative else 182) * mm
     scale = min(max_width / width, max_height / height)
     image = Image(str(path), width=width * scale, height=height * scale)
     image.hAlign = "CENTER"
     return KeepTogether(
-        [image, Paragraph(inline_markup(alt), STYLES["ReportCaption"])]
+        [*lead, image, Paragraph(inline_markup(alt), STYLES["ReportCaption"])]
     )
 
 
-def parse_markdown(lines: list[str]):
+def parse_markdown(lines: list[str], *, module: str = "1"):
     story = []
     paragraph: list[str] = []
     bullets: list[str] = []
     code: list[str] = []
     in_code = False
-    major_seen = False
 
     def flush_paragraph():
         nonlocal paragraph
@@ -443,7 +447,25 @@ def parse_markdown(lines: list[str]):
             flush_bullets()
             if "04b-admin-security-settings" in image_match.group(2):
                 story.append(PageBreak())
-            story.append(report_image(image_match.group(1), image_match.group(2)))
+            lead = []
+            if (
+                module == "3"
+                and "report-evidence/module-3/" in image_match.group(2)
+                and len(story) >= 2
+                and isinstance(story[-2], Paragraph)
+                and story[-2].style.name == "ReportH2"
+            ):
+                start = -2
+                if (
+                    "m3-01-" in image_match.group(2)
+                    and len(story) >= 3
+                    and isinstance(story[-3], Paragraph)
+                    and story[-3].style.name == "ReportH1"
+                ):
+                    start = -3
+                lead = story[start:]
+                del story[start:]
+            story.append(report_image(image_match.group(1), image_match.group(2), lead))
             i += 1
             continue
 
@@ -467,12 +489,13 @@ def parse_markdown(lines: list[str]):
             flush_bullets()
             level = len(heading.group(1))
             title = heading.group(2)
-            if level == 2 and (title == "2.4. Schemat ER" or re.match(r"^3\.[2-7]\.", title)):
+            if level == 1 and title == "8. Źródła":
+                story.append(PageBreak())
+            if level == 2 and module != "3" and (
+                title == "2.4. Schemat ER" or re.match(r"^3\.[2-7]\.", title)
+            ):
                 story.append(PageBreak())
             if level == 1:
-                if major_seen:
-                    story.append(PageBreak())
-                major_seen = True
                 style = STYLES["ReportH1"]
             elif level == 2:
                 style = STYLES["ReportH2"]
@@ -491,6 +514,8 @@ def parse_markdown(lines: list[str]):
         if stripped == "":
             flush_paragraph()
             flush_bullets()
+        elif bullets:
+            bullets[-1] += f" {stripped.rstrip('  ')}"
         else:
             paragraph.append(stripped.rstrip("  "))
         i += 1
@@ -501,11 +526,34 @@ def parse_markdown(lines: list[str]):
 
 
 def main():
+    global SOURCE, OUTPUT
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", type=Path, default=SOURCE)
+    parser.add_argument("--output", type=Path, default=OUTPUT)
+    parser.add_argument(
+        "--subtitle",
+        default="Raport z realizacji modułu | uwierzytelniania i autoryzacji",
+    )
+    parser.add_argument("--date", default="25.10.2026")
+    parser.add_argument("--module", default="1")
+    args = parser.parse_args()
+
+    SOURCE = args.source.resolve()
+    OUTPUT = args.output.resolve()
     source_lines = SOURCE.read_text(encoding="utf-8").splitlines()
     start = source_lines.index("## Streszczenie")
-    story = cover_story() + parse_markdown(source_lines[start:])
+    story = cover_story(
+        subtitle=args.subtitle,
+        report_date=args.date,
+        module=args.module,
+    ) + parse_markdown(source_lines[start:], module=args.module)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    document = ReportDocument(str(OUTPUT))
+    title = f"SecureDesk - raport Moduł {args.module}, wariant 2"
+    document = ReportDocument(
+        str(OUTPUT),
+        title=title,
+        subject=f"Cybersecurity course report, module {args.module}, variant 2",
+    )
     document.multiBuild(story)
     print(OUTPUT)
 

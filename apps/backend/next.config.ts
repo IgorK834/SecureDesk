@@ -13,6 +13,8 @@ loadEnvConfig(
 
 const nextConfig: NextConfig = {
   agentRules: false,
+  // The framework otherwise prints the raw incoming URL in development.
+  ...(process.env.CANARYTOKENS_WEBHOOK_SECRET?.trim() && { logging: { incomingRequests: false } }),
   // Native modules must be required at runtime, not bundled.
   serverExternalPackages: ['better-sqlite3', 'argon2', 'opentype.js'],
   async headers() {

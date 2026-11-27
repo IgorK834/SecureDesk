@@ -16,6 +16,11 @@ captured by Playwright from the real output of `scripts/show-hashes.sh` against 
 | Backend-enforced inactivity logout            | `07-idle-logout.png`               | `idle-timeout.spec.ts`                            |
 | Database entity-relationship diagram          | `er-diagram.png`                   | `npx mmdc -i docs/database-schema.mmd ...`        |
 
+Module 2 uses the fixed `module-2/m2-01` through `m2-08` names documented in
+[`module-2/README.md`](module-2/README.md). Seven hermetic Playwright journeys recreate all eight
+files. The account-trap and AWS files deliberately identify themselves as local-event evidence
+until an operator replaces them with redacted hosted notifications after the live runbook.
+
 ## Secret-safety checklist
 
 - The temporary password locator is masked during screenshot capture. The unmasked value exists only
@@ -30,3 +35,24 @@ captured by Playwright from the real output of `scripts/show-hashes.sh` against 
   value. Generated E2E credentials and the E2E database are git-ignored.
 - Image placement is checked by `npm run check:image-locations`; repository image files are allowed
   only in this directory.
+
+## Module 3 evidence
+
+Run `npm run test:e2e:module3 -- --evidence` to regenerate the images from a disposable
+SQLite database. The text captures show actual command output, downloaded content or
+delivered file lines rendered in a browser for legibility.
+
+| Scenario                                             | Evidence                                  | Producer                                              |
+| ---------------------------------------------------- | ----------------------------------------- | ----------------------------------------------------- |
+| Filtered audit browser                               | `module-3/m3-01-log-browser-filter.png`   | `audit-log.spec.ts`                                   |
+| Latest audit rows and hash prefixes from SQLite      | `module-3/m3-02-audit-table-fragment.png` | `audit-log.spec.ts` and `scripts/show-audit-table.sh` |
+| Intact verification before changing a synthetic row  | `module-3/m3-03-integrity-intact.png`     | `audit-integrity.spec.ts`                             |
+| Verification identifies the changed row              | `module-3/m3-04-integrity-tampered.png`   | `audit-integrity.spec.ts`                             |
+| Critical alert opened in the audit drawer            | `module-3/m3-05-alert-in-log.png`         | `detection.spec.ts`                                   |
+| Two delivered alert lines with the critical alert ID | `module-3/m3-06-alert-file.png`           | `detection.spec.ts`                                   |
+| Actual filtered CSV download                         | `module-3/m3-07-exported-file.png`        | `audit-log.spec.ts`                                   |
+| Trap-account audit event                             | `module-3/m3-08-trap-account-entry.png`   | `audit-log.spec.ts`                                   |
+
+The two alert captures use the same run. The browser assertion matches the critical alert ID
+from the file against the text in the drawer. Password inputs, temporary password dialogs and
+request headers are outside the capture steps. The IP addresses are documentation addresses.

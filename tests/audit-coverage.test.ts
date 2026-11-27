@@ -91,6 +91,20 @@ function sampleTicket() {
 }
 
 const AUDIT_COVERAGE: Readonly<Record<string, CoverageDecision>> = {
+  'webhooks.canarytokens.receive': {
+    actions: ['HONEYTOKEN_ALERT_RECEIVED'],
+    sample: () => ({
+      client: createApiClient(),
+      options: {
+        params: { secret: 'canary-fixture-path-key' },
+        json: { memo: 'securedesk:' + ACCOUNT_TRAP_ID, time: NOW.toISOString() },
+      },
+    }),
+  },
+  'admin.audit_log.verify': {
+    actions: ['AUDIT_LOG_VERIFIED'],
+    sample: () => admin(),
+  },
   'admin.audit_log.export': {
     actions: ['AUDIT_LOG_EXPORTED'],
     sample: () => admin({ json: { format: 'jsonl' } }),
@@ -303,6 +317,7 @@ describe('mutating route audit coverage', () => {
     vi.stubEnv('CAPTCHA_HMAC_SECRET', 'synthetic-coverage-test-secret');
     vi.stubEnv('CANARY_ALERTS_ENABLED', 'false');
     vi.stubEnv('ALERT_WEBHOOK_URL', '');
+    vi.stubEnv('CANARYTOKENS_WEBHOOK_SECRET', 'canary-fixture-path-key');
     vi.spyOn(console, 'info').mockImplementation(() => undefined);
   });
 

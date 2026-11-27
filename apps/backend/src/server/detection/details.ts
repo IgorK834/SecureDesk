@@ -13,6 +13,9 @@ export const detectionAlertDetails = z.strictObject({
   count: z.int().positive(),
   windowMinutes: z.int().nonnegative(),
   auditSeq: z.int().positive(),
+  firstSeq: z.int().positive().optional(),
+  lastSeq: z.int().positive().optional(),
+  elapsedMs: z.int().nonnegative().optional(),
 });
 
 export type DetectionAlertDetails = z.output<typeof detectionAlertDetails>;

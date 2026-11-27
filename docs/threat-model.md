@@ -59,3 +59,22 @@ counting, lock duration is finite, an audited administrator unlock exists and no
 the same phantom-lock behavior. Per-address limits reduce spraying but can affect innocent users
 behind NAT or a privacy relay. Honeytokens are high-signal only when legitimate scanners and backup
 jobs are prevented from touching the lure.
+
+## Module 3 audit and alerting
+
+| Threat                                           | Control                                                                                                           | Verification                   |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Disabled or selectively omitted recording        | Route coverage, strict event declarations, and fail-closed audit writes for state changes and successful sign-ins | SEC-72, SEC-73, SEC-77         |
+| Local row edits or deletes                       | Append-only triggers, independent hash verification and chain checks                                              | SEC-75, SEC-76, SEC-83, SEC-84 |
+| Tail truncation or a rewritten local chain       | Private head anchor and an optional independent off-host copy                                                     | SEC-85, SEC-86, SEC-95         |
+| Log injection or accidental credentials in input | Structured fields, a closed catalogue, control-character escaping and keyed references for unknown logins         | SEC-65, SEC-66                 |
+| Privileged reading or bulk disclosure            | Administrator-only permissions, safe exports and audit records of access, export and verification                 | SEC-79, SEC-80, SEC-81         |
+| Missed detection or alert storms                 | Count lock refusals, use a persisted rule-and-subject cooldown, keep durable evidence on dispatch failure         | SEC-89, SEC-92, SEC-93         |
+| Forged or replayed inbound webhook               | Path-secret authentication, capped JSON, rate limiting, replay suppression and no reply dispatch                  | SEC-94                         |
+| Exposure of retained personal data               | Minimal payloads, private files and a documented indefinite-retention trade-off                                   | Review                         |
+
+A host administrator can control the database, anchor and local alert file together.
+The chain provides evidence of change when a known reference survives. A copy on a separately
+administered host improves that reference. SQLite and process-local limiters constrain the
+deployment model. Indefinite retention of logins and IP addresses keeps the assignment history
+complete and requires a privacy, access and archival policy before production use.

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SecureDesk sign in</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+:root{color-scheme:dark;--muted:#A6AAB2;--line:rgba(255,255,255,.14)}
+*{box-sizing:border-box}
+body{margin:0;background:#161617;color:#fff;font-family:'Manrope',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#fff}
+:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.wide{font-family:'Archivo',sans-serif;font-stretch:125%}
+.screen{position:relative;overflow:hidden;margin:16px;border-radius:36px;border:1px solid rgba(255,255,255,.16);background:#000;min-height:868px}
+.dots{position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(rgba(255,255,255,.38) 1.4px,transparent 1.9px);background-size:30px 30px;-webkit-mask-image:radial-gradient(ellipse at 50% 100%,#000 0,transparent 78%);mask-image:radial-gradient(ellipse at 50% 100%,#000 0,transparent 78%)}
+.card{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.14);border-radius:24px;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+.glass{background:linear-gradient(135deg,rgba(255,255,255,.14),rgba(255,255,255,.05));border:1px solid rgba(255,255,255,.18);border-radius:20px;-webkit-backdrop-filter:blur(22px);backdrop-filter:blur(22px)}
+.in{width:100%;height:50px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:14px;background:rgba(255,255,255,.04);color:#fff;font:500 16px 'Manrope',sans-serif}
+.in:focus{border-color:#fff;outline:2px solid rgba(255,255,255,.45);outline-offset:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 22px;border-radius:14px;border:1px solid transparent;font:700 15px 'Manrope',sans-serif;cursor:pointer;text-decoration:none}
+.btn-p{background:#fff;color:#000}.btn-p:hover{background:#E6E6E6}
+.btn-s{background:rgba(255,255,255,.06);color:#fff;border-color:rgba(255,255,255,.24)}.btn-s:hover{background:rgba(255,255,255,.13)}
+@property --a{syntax:'<angle>';inherits:false;initial-value:210deg}
+@property --b{syntax:'<angle>';inherits:false;initial-value:0deg}
+@property --r1{syntax:'<percentage>';inherits:false;initial-value:36%}
+@property --r2{syntax:'<percentage>';inherits:false;initial-value:22%}
+@keyframes flow{to{--a:570deg}}
+@keyframes flow2{to{--a:-340deg}}
+@keyframes sweep{to{--b:360deg}}
+@keyframes pulse1{from{--r1:27%}to{--r1:41%}}
+@keyframes pulse2{from{--r2:12%}to{--r2:30%}}
+@keyframes drift{from{-webkit-mask-position:6.5px 6.5px;mask-position:6.5px 6.5px}to{-webkit-mask-position:19.5px 19.5px;mask-position:19.5px 19.5px}}
+@keyframes blob{0%{border-radius:50%;transform:scale(1)}50%{border-radius:47% 53% 52% 48%/52% 46% 54% 48%;transform:scale(1.025)}100%{border-radius:53% 47% 46% 54%/46% 54% 48% 52%;transform:scale(.985)}}
+@keyframes floaty{from{transform:translateY(0)}to{transform:translateY(-12px)}}
+@keyframes turn{to{transform:rotate(360deg)}}
+.float{animation:floaty 5s ease-in-out infinite alternate}
+.ring{transform-origin:50% 50%;animation:turn 22s linear infinite}
+.orb{position:relative;width:100%;max-width:560px;aspect-ratio:1;border-radius:50%;overflow:hidden;background:#000;animation:blob 11s ease-in-out infinite alternate}
+.orb .l1,.orb .l2,.orb .sweep{position:absolute;inset:0}
+.orb .sweep{--b:0deg;background:conic-gradient(from var(--b),rgba(0,0,0,0) 0deg,rgba(0,0,0,.62) 120deg,rgba(0,0,0,0) 240deg);animation:sweep 9s linear infinite}
+.orb .l1{--a:210deg;--r1:36%;background:conic-gradient(from var(--a),#FF3D57,#FF9D2E,#FFE45C,#5CF0C8,#2AA8FF,#7A4DFF,#FF3D9A,#FF3D57);-webkit-mask-image:radial-gradient(circle,#000 var(--r1),transparent calc(var(--r1) + 9%));-webkit-mask-size:13px 13px;mask-image:radial-gradient(circle,#000 var(--r1),transparent calc(var(--r1) + 9%));mask-size:13px 13px;animation:flow 16s linear infinite,pulse1 4.5s ease-in-out infinite alternate}
+.orb .l2{--a:20deg;--r2:22%;background:conic-gradient(from var(--a),#2AA8FF,#7A4DFF,#FF3D9A,#FF9D2E,#FFE45C,#5CF0C8,#2AA8FF);opacity:.65;mix-blend-mode:screen;-webkit-mask-image:radial-gradient(circle,#000 var(--r2),transparent calc(var(--r2) + 10%));-webkit-mask-size:13px 13px;-webkit-mask-position:6.5px 6.5px;mask-image:radial-gradient(circle,#000 var(--r2),transparent calc(var(--r2) + 10%));mask-size:13px 13px;mask-position:6.5px 6.5px;animation:flow2 22s linear infinite,pulse2 3.2s ease-in-out infinite alternate,drift 8s linear infinite}
+@media (prefers-reduced-motion:reduce){.orb,.orb .l1,.orb .l2,.orb .sweep,.float,.ring{animation:none !important}}
+.orb .shade{position:absolute;inset:0;background:radial-gradient(circle at 50% 46%,rgba(0,0,0,0) 28%,rgba(0,0,0,.5) 60%,#000 78%),radial-gradient(circle at 70% 18%,rgba(0,0,0,.65),transparent 30%)}
+</style>
+</helmet>
+<div class="screen">
+  <div class="dots" aria-hidden="true"></div>
+
+  <header style="position:relative;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:28px 40px 0">
+    <div style="display:flex;align-items:center;gap:12px">
+      <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><g fill="#fff"><rect x="2" y="2" width="9" height="9" rx="2"/><circle cx="21" cy="6.5" r="3"/><circle cx="6.5" cy="21" r="3"/><rect x="16.5" y="16.5" width="9" height="9" rx="2"/></g></svg>
+      <span class="wide" style="font-weight:800;font-size:20px;letter-spacing:-0.01em">SecureDesk</span>
+    </div>
+    <span style="font-size:12px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted)">Internal helpdesk</span>
+  </header>
+
+  <div style="position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:32px;padding:24px 56px 56px">
+
+    <section style="flex:1 1 480px;min-width:0;display:flex;justify-content:center">
+      <div style="position:relative;width:100%;max-width:560px">
+        <div class="orb" role="img" aria-label="Decorative sphere made of colourful dots">
+          <div class="l1"></div><div class="l2"></div><div class="sweep"></div><div class="shade"></div>
+        </div>
+        <div class="glass float" style="position:absolute;left:-4%;top:40%;max-width:56%;padding:20px 22px;display:flex;flex-direction:column;gap:10px">
+          <h2 class="wide" style="margin:0;font-size:17px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase">Sessions</h2>
+          <p style="margin:0;font-size:13px;line-height:1.5;color:#E8EAEE">Cookies are checked on the server and revoked after inactivity.</p>
+        </div>
+        <div class="glass float" style="animation-delay:-2.5s;position:absolute;right:-2%;bottom:10%;max-width:56%;padding:20px 22px;display:flex;flex-direction:column;gap:10px">
+          <h2 class="wide" style="margin:0;font-size:17px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase">Login protection</h2>
+          <p style="margin:0;font-size:13px;line-height:1.5;color:#E8EAEE">Lockout, address blocks and a CAPTCHA challenge stand before every password.</p>
+        </div>
+        <svg class="ring" viewBox="0 0 120 120" width="112" height="112" aria-hidden="true" style="position:absolute;right:0;top:4%">
+          <defs><path id="ring" d="M60,60 m-42,0 a42,42 0 1,1 84,0 a42,42 0 1,1 -84,0"/></defs>
+          <text font-family="Manrope,sans-serif" font-size="11.5" font-weight="500" letter-spacing="1.5" fill="#fff"><textPath href="#ring">Honeytokens watch · Honeytokens watch ·</textPath></text>
+        </svg>
+      </div>
+    </section>
+
+    <main style="flex:1 1 420px;min-width:0;display:flex;justify-content:center">
+      <form class="card" style="width:100%;max-width:440px;padding:36px;display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <h1 class="wide" style="margin:0;font-size:40px;font-weight:300;letter-spacing:-0.01em;text-transform:uppercase;line-height:1.05">Sign in</h1>
+          <p style="margin:0;font-size:15px;color:var(--muted)">Use the login your administrator gave you.</p>
+        </div>
+
+        <div role="alert" style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;background:rgba(255,90,79,.14);border:1px solid rgba(255,90,79,.4);color:#FFB4AC;font-size:14px;line-height:1.45">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="flex:none;margin-top:1px"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+          <span>Invalid login or password. After 5 failed attempts the account is locked for 15 minutes.</span>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label for="login" style="font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)">Login</label>
+          <input id="login" class="in" type="text" value="employee1" autocomplete="username" readonly>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.03)">
+          <span style="font-size:14px;font-weight:600">Type the characters in reverse order</span>
+          <svg viewBox="0 0 240 80" width="240" height="80" role="img" aria-label="Distorted characters: 3 G T E M B" style="border-radius:12px;background:#111214;max-width:100%">
+            <path d="M6 20 L234 12 M4 52 L236 30 M6 70 L234 56" stroke="#5A6068" stroke-width="1.5" fill="none"/>
+            <g font-family="Archivo,sans-serif" font-weight="800" font-size="38" fill="#fff">
+              <text x="22" y="56" transform="rotate(-6 30 46)">3</text>
+              <text x="56" y="52" transform="rotate(4 66 40)">G</text>
+              <text x="92" y="56" transform="rotate(-9 100 44)">T</text>
+              <text x="126" y="52" transform="rotate(7 136 40)">E</text>
+              <text x="158" y="56" transform="rotate(-5 168 44)">M</text>
+              <text x="198" y="54" transform="rotate(8 208 42)">B</text>
+            </g>
+          </svg>
+          <label for="captcha" style="font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)">Reversed characters</label>
+          <input id="captcha" class="in" type="text" value="BMETG3" autocomplete="off" readonly style="font-family:'IBM Plex Mono',monospace;letter-spacing:0.16em">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <span style="font-size:13px;color:var(--muted)">New challenge in 120 seconds.</span>
+            <button type="button" class="btn btn-s" style="min-height:44px;font-size:14px">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
+              New challenge
+            </button>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label for="password" style="font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)">Password</label>
+          <input id="password" class="in" type="password" value="••••••••••••" autocomplete="current-password" readonly>
+        </div>
+
+        <button type="submit" class="btn btn-p" style="width:100%;justify-content:space-between;padding:0 24px">
+          Sign in
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg>
+        </button>
+      </form>
+    </main>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

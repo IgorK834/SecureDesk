@@ -28,7 +28,9 @@ const COLUMNS = [
   'entry_hash',
 ] as const;
 
-function toExportRow(row: AuditLogRow): Record<(typeof COLUMNS)[number], string | number | null> {
+export function toExportRow(
+  row: AuditLogRow,
+): Record<(typeof COLUMNS)[number], string | number | null> {
   return {
     seq: row.seq,
     id: row.id,

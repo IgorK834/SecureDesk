@@ -15,7 +15,17 @@ const filters = {
   from: date.optional(),
   to: date.optional(),
 };
-const validRange = ({ from, to }: { from?: string; to?: string }) => !from || !to || from <= to;
+const validRange = ({
+  from,
+  to,
+  fromSeq,
+  toSeq,
+}: {
+  from?: string;
+  to?: string;
+  fromSeq?: number;
+  toSeq?: number;
+}) => (!from || !to || from <= to) && (!fromSeq || !toSeq || fromSeq <= toSeq);
 
 export const AuditListQuery = z
   .strictObject({
@@ -26,6 +36,8 @@ export const AuditListQuery = z
     ),
     page: positiveInteger.default(1),
     pageSize: positiveInteger.pipe(z.number().max(100)).default(20),
+    fromSeq: positiveInteger.optional(),
+    toSeq: positiveInteger.optional(),
   })
   .refine(validRange)
   .refine(({ page, pageSize }) => Number.isSafeInteger((page - 1) * pageSize));
@@ -33,7 +45,12 @@ export const AuditListQuery = z
 export const AuditSeqParams = z.strictObject({ seq: positiveInteger });
 
 export const AuditExportBody = z
-  .strictObject({ ...filters, format: z.enum(['csv', 'jsonl']) })
+  .strictObject({
+    ...filters,
+    fromSeq: z.int().positive().optional(),
+    toSeq: z.int().positive().optional(),
+    format: z.enum(['csv', 'jsonl']),
+  })
   .refine(validRange);
 
 export type AuditExportRequest = z.output<typeof AuditExportBody>;

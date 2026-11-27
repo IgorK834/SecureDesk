@@ -787,15 +787,28 @@ import { createHash } from 'node:crypto';
 
 function verifyAuditRows(rows) {
   const fields = [
-    'seq', 'id', 'occurred_at', 'actor_type', 'actor_user_id', 'actor_login',
-    'subject_login', 'subject_ref', 'ip', 'action', 'description', 'outcome',
-    'details', 'request_id',
+    'seq',
+    'id',
+    'occurred_at',
+    'actor_type',
+    'actor_user_id',
+    'actor_login',
+    'subject_login',
+    'subject_ref',
+    'ip',
+    'action',
+    'description',
+    'outcome',
+    'details',
+    'request_id',
   ];
   let previous = '0'.repeat(64);
   let seq = 1;
   for (const row of rows) {
     const content = JSON.stringify(['sd-audit-v1', ...fields.map((field) => row[field])]);
-    const expected = createHash('sha256').update(previous + '\n' + content, 'utf8').digest('hex');
+    const expected = createHash('sha256')
+      .update(previous + '\n' + content, 'utf8')
+      .digest('hex');
     if (row.seq !== seq || row.prev_hash !== previous || row.entry_hash !== expected) {
       throw new Error(`Audit chain failed at expected row ${seq}`);
     }
@@ -856,6 +869,84 @@ use JSON Lines for byte-preserving verification. A full JSON Lines export carrie
 and canonical details text used by the verification snippet above. For a filtered export, recompute
 individual entries using their own `prev_hash`. Sequence gaps in a filtered file may reflect the
 filters.
+
+### Audit integrity and head anchor
+
+`POST /api/admin/audit-log/verify` requires `audit-log:verify` and CSRF. It checks the chain from
+the genesis through the head selected at the start of the run. It reads up to 1,000 entries per
+batch and yields between batches. A second run in the same backend process returns
+`409 VERIFICATION_IN_PROGRESS`. The verification result describes the scanned range, and the
+subsequent `AUDIT_LOG_VERIFIED` entry records the outcome, count, and first problem if present.
+`GET /api/admin/audit-log/integrity` requires `audit-log:read` and returns the latest recorded
+summary and UTC timestamp. The admin browser can filter its table to the affected entry when
+that row still exists.
+
+After a transaction appends audit entries and commits, the backend updates a separate
+`head-anchor.json` by atomically renaming a private temporary file. The file contains only
+`seq`, `hash`, and `writtenAt`. Its mode is `0600`, and its parent directory must have mode `0700`.
+For a file-backed database the default is `audit/<database-filename>.head-anchor.json` beside the
+database. `AUDIT_ANCHOR_PATH` can override it. Use a dedicated private directory outside all
+public and frontend directories and the git-ignored `head-anchor.json` filename. Use a fresh
+database and anchor pair when rebuilding a disposable environment.
+
+The verification checks that the anchored sequence and hash still exist in the chain. A removed
+tail or recomputed history that changes the anchored hash produces `HEAD_MISMATCH`. A matching
+anchor behind the database head is valid after an interrupted write. A nonempty log with no
+anchor returns `ANCHOR_MISSING`. If the database and anchor disagree, later commits preserve the
+existing anchor. An anchor write failure is logged after the database commit. A host-level attacker
+who can rewrite both files can defeat this check. SD-89 specifies an off-host copy to cover that case.
+
+The append-only SQLite triggers protect against accidental edits and deletes through the
+application. Conformance tests reject mutation routes and audit settings, and SQL lint rejects
+audit update and delete calls. A person with direct write access to the database can remove its
+triggers. Chain verification detects changed records and missing middle entries. The separate
+anchor detects a removed tail or an alternate, internally consistent history. An off-host copy
+can retain the original witness if the machine holding both local files is compromised. The
+[audit log runbook](audit-log.md) exercises these guarantees with disposable fixtures.
+
+### Scheduled verification and tamper alerts
+
+Committed audit writes trigger a background check. The first write is eligible immediately if
+there is no `AUDIT_LOG_VERIFIED` entry. Subsequent checks use the newest verification timestamp
+and `AUDIT_VERIFY_INTERVAL_MINUTES`, which defaults to 60. A check records as `SYSTEM`, and a
+database transaction rechecks the interval before saving the result. Run `npm run audit:verify`
+from cron to force a check during quiet periods. It prints the result as JSON and exits `0` for
+an intact log or `1` when it finds tampering or cannot complete verification.
+
+A tampered result records `AUDIT_TAMPER_DETECTED` with the first problem. A changed finding
+also adds `ALERT_RAISED` and a `CRITICAL` `DETECTION_ALERT` in the same transaction. The latest
+finding is persisted in the audit trail, so repeated checks of the same sequence, ID, and problem
+kind do not send duplicate alerts across restarts.
+
+After commit the alert dispatcher appends one JSON line to `alerts/security-alerts.jsonl` beside
+the database. `ALERT_FILE_PATH` can point to another private file. The file has mode `0600` and
+its directory has mode `0700`. If `ALERT_WEBHOOK_URL` is configured, the same alert ID is sent
+through the existing webhook dispatcher. Delivery failures appear as `FAILED` on the security
+event, and the committed verification and finding remain available for investigation.
+
+### Login detection and alert review
+
+The detection engine receives the audit entries from a committed transaction. Rule evaluation
+runs after the write returns. It uses the triggering entry's time and sequence to bound the input
+even when later entries have already committed. Five credential failures or lock refusals for the
+same subject in a rolling five-minute window raise a warning. A successful login after three
+wrong passwords within ten minutes of that login raises a critical alert. A previous success
+resets the second rule. CAPTCHA, honeypot, and IP block refusals do not contribute to either rule.
+Unknown accounts are grouped by their audit subject reference.
+
+Alert creation and the five-minute cooldown check run in one SQLite transaction. The audit row
+and security event share an ID with the private JSON Lines delivery. Operational rule failures
+leave the original request and its audit record intact. The admin audit page lists both rules
+and their last alert times. A security event links to its inclusive audit sequence range, and
+acknowledging the event clears its contribution to the critical banner.
+
+### Optional audit integrations
+
+The inbound Canarytokens webhook authenticates before parsing, deduplicates deliveries and
+records a critical event with outbound dispatch suppressed. The optional Loki shipper reads
+committed entries in sequence and keeps an acknowledgement cursor in SQLite. Both integrations
+are exercised with local stubs. Their configuration, privacy boundaries and recovery procedures
+are in the [Canarytokens runbook](canarytokens.md) and the [Loki runbook](loki.md).
 
 ## HTTP response hardening and deployment
 

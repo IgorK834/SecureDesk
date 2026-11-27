@@ -1,6 +1,7 @@
 import { DatePipe, JsonPipe } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import {
   AdminApi,
@@ -27,11 +28,12 @@ const EVENT_TYPES = [
   'ACCOUNT_UNLOCKED_BY_ADMIN',
   'IP_BLOCK_CLEARED_BY_ADMIN',
   'SECURITY_SETTINGS_CHANGED',
+  'DETECTION_ALERT',
 ] as const;
 
 @Component({
   selector: 'app-security-events',
-  imports: [DatePipe, JsonPipe, FormsModule],
+  imports: [DatePipe, JsonPipe, FormsModule, RouterLink],
   template: `
     <h1>Security events</h1>
     <p>Review retained security signals and acknowledge incidents that have been handled.</p>
@@ -117,7 +119,16 @@ const EVENT_TYPES = [
                     }}</span>
                   </td>
                   <td>
-                    <strong>{{ event.type }}</strong>
+                    <strong>{{ event.detection?.title ?? event.type }}</strong>
+                    @if (event.detection; as detection) {
+                      <p>
+                        <a
+                          routerLink="/admin/audit-log"
+                          [queryParams]="{ fromSeq: detection.firstSeq, toSeq: detection.lastSeq }"
+                          >View triggering audit entries</a
+                        >
+                      </p>
+                    }
                     <pre>{{ event.details | json }}</pre>
                   </td>
                   <td>{{ event.ipKey ?? '—' }}</td>

@@ -61,12 +61,14 @@ export interface RouteContext<
   params: Parsed<P>;
 }
 
-export interface RouteOptions<
+type WebhookCheck = (params: Record<string, string | string[] | undefined> | undefined) => void;
+
+export type RouteOptions<
   A extends RouteAuth,
   Q extends Schema,
   B extends Schema,
   P extends Schema,
-> {
+> = {
   /** Prefix of this route's log events, for example `tickets.list`. */
   name: string;
   auth: A;
@@ -77,7 +79,10 @@ export interface RouteOptions<
   /** Zod schema for the dynamic path segments. */
   params?: P;
   handler: (context: RouteContext<A, Q, B, P>) => Promise<Response> | Response;
-}
+} & (
+  | { csrf?: never; authenticateWebhook?: never }
+  | (A extends 'public' ? { csrf: 'webhook'; authenticateWebhook: WebhookCheck } : never)
+);
 
 /** The second argument Next.js gives a route handler. `params` is a Promise since Next 15. */
 export interface SegmentContext {
@@ -91,6 +96,7 @@ const ROUTE_META = Symbol.for('securedesk.route-meta');
 export interface RouteMeta {
   name: string;
   auth: RouteAuth;
+  csrf?: 'webhook';
 }
 
 /** What `defineRoute` recorded about a handler, or `undefined` if it was not built by it. */
@@ -164,12 +170,18 @@ export function defineRoute<
   B extends Schema = undefined,
   P extends Schema = undefined,
 >(options: RouteOptions<A, Q, B, P>): DefinedRoute {
-  const { name, auth, query, body, params, handler } = options;
+  const { name, auth, query, body, params, handler, csrf, authenticateWebhook } = options;
+  if (csrf === 'webhook' && (auth !== 'public' || typeof authenticateWebhook !== 'function')) {
+    throw new Error(
+      'A webhook CSRF exemption requires public routing and an authentication check.',
+    );
+  }
 
   const route: DefinedRoute = async (request, segment) => {
     const requestId = randomUUID();
     let audit: AuditContext | undefined;
     try {
+      if (csrf === 'webhook') authenticateWebhook!(await segment?.params);
       checkBodyHeaders(request, body !== undefined);
 
       const clientIp = resolveClientIp(request.headers, process.env);
@@ -187,7 +199,7 @@ export function defineRoute<
           : requireResolvedStage(resolved, auth.stages, { permission: auth.permission });
 
       // A forged request must be refused before it can count as session activity.
-      assertCsrfProtection(request, session?.session);
+      if (csrf !== 'webhook') assertCsrfProtection(request, session?.session);
 
       if (session) touchSession(db, session.session.id);
 
@@ -232,5 +244,7 @@ export function defineRoute<
     }
   };
 
-  return Object.defineProperty(route, ROUTE_META, { value: { name, auth } satisfies RouteMeta });
+  return Object.defineProperty(route, ROUTE_META, {
+    value: { name, auth, ...(csrf && { csrf }) } satisfies RouteMeta,
+  });
 }

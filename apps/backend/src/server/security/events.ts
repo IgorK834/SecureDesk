@@ -58,7 +58,10 @@ export const SECURITY_EVENTS = {
   HONEYTOKEN_TRIGGERED: {
     severity: 'CRITICAL',
     alert: true,
-    details: z.strictObject({ trapKind: z.enum(['ACCOUNT_TRAP', 'AWS_KEYS']) }),
+    details: z.strictObject({
+      trapKind: z.enum(['ACCOUNT_TRAP', 'AWS_KEYS']),
+      source: z.literal('CANARYTOKENS_WEBHOOK').optional(),
+    }),
   },
   HONEYTOKEN_TESTED: {
     severity: 'INFO',
@@ -217,6 +220,8 @@ function newRow(
   details: Record<string, unknown>,
 ) {
   const definition = SECURITY_EVENTS[input.type];
+  const inbound =
+    input.type === 'HONEYTOKEN_TRIGGERED' && details.source === 'CANARYTOKENS_WEBHOOK';
   const dispatchable = 'alert' in definition && listAlertDispatchers().length > 0;
   const detection = input.type === 'DETECTION_ALERT' ? (details as DetectionAlertDetails) : null;
   return {
@@ -231,7 +236,11 @@ function newRow(
     honeytokenId: input.honeytokenId ?? null,
     details: JSON.stringify(details),
     requestId: input.requestId,
-    alertStatus: dispatchable ? ('PENDING' as const) : ('NONE' as const),
+    alertStatus: inbound
+      ? ('SUPPRESSED' as const)
+      : dispatchable
+        ? ('PENDING' as const)
+        : ('NONE' as const),
   };
 }
 

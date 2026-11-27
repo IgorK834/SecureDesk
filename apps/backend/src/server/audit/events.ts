@@ -173,6 +173,15 @@ export const AUDIT_ACTIONS = {
       z.strictObject({ resource: z.literal('/api/backup/config') }),
     ),
   },
+  HONEYTOKEN_ALERT_RECEIVED: {
+    SUCCESS: event(
+      'Received a Canarytokens alert.',
+      z.strictObject({
+        trapKind: z.enum(['ACCOUNT_TRAP', 'AWS_KEYS']),
+        source: z.literal('CANARYTOKENS_WEBHOOK'),
+      }),
+    ),
+  },
   AUDIT_LOG_VIEWED: {
     SUCCESS: event(
       'Audit log viewed.',
@@ -196,6 +205,8 @@ export const AUDIT_ACTIONS = {
           outcome: z.enum(['SUCCESS', 'FAILURE']).optional(),
           from: z.iso.datetime().optional(),
           to: z.iso.datetime().optional(),
+          fromSeq: seq.optional(),
+          toSeq: seq.optional(),
         }),
       }),
     ),

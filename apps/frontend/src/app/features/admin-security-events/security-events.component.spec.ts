@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import '../../__fixtures__/test-environment';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthService } from '../../core/auth/auth.service';
@@ -61,6 +62,7 @@ function setup(
   const alerts = { markAcknowledged: vi.fn() };
   TestBed.configureTestingModule({
     providers: [
+      provideRouter([]),
       { provide: AdminApi, useValue: api },
       {
         provide: AuthService,

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability (private)
+    url: https://github.com/IgorK834/SecureDesk/security/advisories/new
+    about: Please do not open a public issue for a vulnerability. Use a private security advisory.

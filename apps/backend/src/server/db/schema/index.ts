@@ -13,3 +13,4 @@ export * from './honeytokens';
 export * from './security-events';
 export * from './captcha-challenges';
 export * from './audit-log';
+export * from './observability';

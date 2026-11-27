@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
+import { auditAnchorPath } from '../../apps/backend/src/server/audit/anchor';
 import { hashPassword } from '../../apps/backend/src/server/auth/password-hasher';
 import { createDb } from '../../apps/backend/src/server/db/connection';
 import { runMigrations } from '../../apps/backend/src/server/db/migrate';
@@ -17,7 +18,9 @@ const selected = {
 } as const;
 
 async function main(): Promise<void> {
+  process.env.AUDIT_ANCHOR_PATH = '';
   mkdirSync(path.dirname(E2E_DATABASE_PATH), { recursive: true });
+  rmSync(auditAnchorPath(E2E_DATABASE_PATH)!, { force: true });
   for (const suffix of ['', '-shm', '-wal'])
     rmSync(`${E2E_DATABASE_PATH}${suffix}`, { force: true });
 

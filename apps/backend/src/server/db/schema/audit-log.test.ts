@@ -2,10 +2,12 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { appendAuditEntry } from '../../audit/append';
+import { verifyAuditChain } from '../../audit/verify';
 import { createMigratedDb, insertUser } from '../__fixtures__/test-db';
 import { createDb, type AppDb } from '../connection';
 import { MIGRATIONS_FOLDER, runMigrations } from '../migrate';
-import { securityEvents, users } from './index';
+import { auditLog, securityEvents, users } from './index';
 
 const values = {
   id: 'test-audit-id',
@@ -85,26 +87,33 @@ describe('audit_log constraints on a fresh database', () => {
         ['action', 'occurred_at'],
         ['actor_user_id', 'occurred_at'],
         ['subject_login', 'occurred_at'],
+        ['subject_login', 'action', 'seq'],
         ['subject_ref', 'occurred_at'],
       ]),
     );
   });
 });
 
+function copyMigrationsBefore(target: string, idx: number): void {
+  mkdirSync(join(target, 'meta'), { recursive: true });
+  const journal = JSON.parse(
+    readFileSync(join(MIGRATIONS_FOLDER, 'meta/_journal.json'), 'utf8'),
+  ) as {
+    entries: { idx: number; tag: string }[];
+  };
+  journal.entries = journal.entries.filter((entry) => entry.idx < idx);
+  for (const { tag } of journal.entries) {
+    copyFileSync(join(MIGRATIONS_FOLDER, tag + '.sql'), join(target, tag + '.sql'));
+  }
+  writeFileSync(join(target, 'meta/_journal.json'), JSON.stringify(journal));
+}
+
 it('upgrades a Module 2 database without changing users, security events or foreign keys', () => {
   const folder = mkdtempSync(join(tmpdir(), 'securedesk-audit-upgrade-'));
   const path = join(folder, 'upgrade.sqlite');
   const module2 = join(folder, 'module2');
   try {
-    mkdirSync(join(module2, 'meta'), { recursive: true });
-    const journal = JSON.parse(
-      readFileSync(join(MIGRATIONS_FOLDER, 'meta/_journal.json'), 'utf8'),
-    ) as { entries: { idx: number; tag: string }[] };
-    journal.entries = journal.entries.filter(({ idx }) => idx < 6);
-    for (const { tag } of journal.entries) {
-      copyFileSync(join(MIGRATIONS_FOLDER, `${tag}.sql`), join(module2, `${tag}.sql`));
-    }
-    writeFileSync(join(module2, 'meta/_journal.json'), JSON.stringify(journal));
+    copyMigrationsBefore(module2, 6);
 
     const original = createDb(path);
     let originalUsers;
@@ -140,6 +149,38 @@ it('upgrades a Module 2 database without changing users, security events or fore
       upgraded.$client.close();
     }
   } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+it('adds the detection index to an existing audit database without changing its chain', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'securedesk-detection-upgrade-'));
+  const db = createDb(join(folder, 'upgrade.sqlite'));
+  try {
+    const prior = join(folder, 'prior');
+    copyMigrationsBefore(prior, 8);
+    runMigrations(db, prior);
+    const row = appendAuditEntry(db, {
+      actorType: 'SYSTEM',
+      subjectLogin: 'fixture',
+      action: 'AUTH_LOGIN_SUCCESS',
+      outcome: 'SUCCESS',
+      details: {},
+      requestId: 'upgrade-fixture',
+    });
+    const index = 'audit_log_subject_login_action_seq_idx';
+    expect(db.$client.pragma('index_info(' + index + ')')).toHaveLength(0);
+    runMigrations(db);
+    expect(db.$client.pragma('index_info(' + index + ')')).toMatchObject([
+      { name: 'subject_login' },
+      { name: 'action' },
+      { name: 'seq' },
+    ]);
+    expect(db.select().from(auditLog).all()).toEqual([row]);
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+    await expect(verifyAuditChain(db)).resolves.toMatchObject({ status: 'INTACT', warnings: [] });
+  } finally {
+    db.$client.close();
     rmSync(folder, { recursive: true, force: true });
   }
 });

@@ -8,7 +8,7 @@ import { canonicalDetails } from './chain';
 import type { AuditContext } from './context';
 import { AUDIT_ACTION_CODES, type AuditFilters, type AuditListRequest } from './schemas';
 
-export function auditFilter({ user, action, outcome, from, to }: AuditFilters) {
+export function auditFilter({ user, action, outcome, from, to, fromSeq, toSeq }: AuditFilters) {
   const pattern = user === undefined ? undefined : '%' + user.replace(/[\\%_]/g, '\\$&') + '%';
   return and(
     pattern === undefined
@@ -22,6 +22,8 @@ export function auditFilter({ user, action, outcome, from, to }: AuditFilters) {
     outcome && eq(auditLog.outcome, outcome),
     from ? gte(auditLog.occurredAt, from) : undefined,
     to ? lte(auditLog.occurredAt, to) : undefined,
+    fromSeq ? gte(auditLog.seq, fromSeq) : undefined,
+    toSeq ? lte(auditLog.seq, toSeq) : undefined,
   );
 }
 

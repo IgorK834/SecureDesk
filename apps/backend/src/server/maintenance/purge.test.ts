@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeClock } from '../../../../../tests/helpers/fake-clock';
+import { appendAuditEntry } from '../audit/append';
 import { createMigratedDb, insertUser, rejectAuditInserts } from '../db/__fixtures__/test-db';
 import type { AppDb } from '../db/connection';
 import {
@@ -69,6 +70,28 @@ const ids = (table: typeof loginAttempts | typeof captchaChallenges | typeof sec
   (db.select({ id: table.id }).from(table).all() as { id: string }[]).map((r) => r.id).sort();
 
 describe('purgeExpired', () => {
+  it('SEC-78 preserves every audit row after ten years and appends the purge result', () => {
+    for (const requestId of ['fixture-one', 'fixture-two']) {
+      appendAuditEntry(db, {
+        actorType: 'SYSTEM',
+        action: 'AUTH_LOGIN_FAILURE',
+        outcome: 'FAILURE',
+        details: { reason: 'BAD_CREDENTIALS' },
+        requestId,
+      });
+    }
+    attempt('old-attempt', T0);
+    challenge('old-challenge', T0);
+    event('old-event', T0, 'CRITICAL');
+    const before = db.select().from(auditLog).orderBy(auditLog.seq).all();
+    fakeClock.set('2040-06-01T12:00:00.000Z');
+
+    expect(purgeExpired(db)).toEqual({ loginAttempts: 1, captchaChallenges: 1, securityEvents: 1 });
+    const rows = db.select().from(auditLog).orderBy(auditLog.seq).all();
+    expect(rows.slice(0, before.length)).toEqual(before);
+    expect(rows.slice(before.length)).toMatchObject([{ action: 'RETENTION_PURGED' }]);
+  });
+
   it('removes login attempts older than 24 hours and keeps the rest', () => {
     attempt('old', ago(24 * HOUR + 1));
     attempt('edge', ago(24 * HOUR));

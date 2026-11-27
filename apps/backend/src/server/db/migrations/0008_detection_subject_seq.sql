@@ -1,0 +1,1 @@
+CREATE INDEX `audit_log_subject_login_action_seq_idx` ON `audit_log` (`subject_login`,`action`,`seq`);

@@ -10,7 +10,90 @@
   }
 </header>
 
-<ng-container #integrityPanel />
+<section class="integrity" aria-labelledby="audit-integrity-title">
+  <header class="integrity-heading">
+    <h2 id="audit-integrity-title">Integrity</h2>
+    @if (auth.has('audit-log:verify')) {
+      <button type="button" [disabled]="verifying()" (click)="verify()">Verify integrity</button>
+    }
+  </header>
+  <div role="status" aria-live="polite" aria-atomic="true">
+    @if (verificationMessage(); as message) {
+      <p>{{ message }}</p>
+    }
+    @if (verification(); as result) {
+      <div class="verification-result" [class.tampered]="result.status === 'TAMPERED'">
+        @if (result.status === 'INTACT') {
+          <strong><span aria-hidden="true">✓</span> Log intact</strong>
+        } @else {
+          <strong><span aria-hidden="true">!</span> Tampering detected</strong>
+          <p class="problem">
+            {{ result.firstProblem.kind }}
+            @if (result.firstProblem.seq !== null) {
+              · Sequence #{{ result.firstProblem.seq }}
+            }
+            @if (result.firstProblem.id; as id) {
+              · Entry ID {{ id }}
+            }
+          </p>
+          @if (
+            result.firstProblem.id &&
+            result.firstProblem.seq !== null &&
+            result.firstProblem.seq > 0
+          ) {
+            <a href="#audit-entries" (click)="focusEntry(result.firstProblem.seq, results, $event)">
+              Filter to entry #{{ result.firstProblem.seq }}
+            </a>
+          }
+        }
+        <p>
+          {{ result.checkedEntries }}
+          {{ result.checkedEntries === 1 ? 'entry' : 'entries' }} checked
+        </p>
+      </div>
+      @if (result.warnings.includes('ANCHOR_MISSING')) {
+        <p class="anchor-warning">The head anchor was missing during verification.</p>
+      }
+      <p class="verified-at">
+        Last verified at
+        <time [attr.datetime]="result.verifiedAt">{{
+          result.verifiedAt | date: "yyyy-MM-dd HH:mm:ss 'UTC'" : 'UTC'
+        }}</time>
+      </p>
+    } @else if (!verificationMessage()) {
+      <p>No verification recorded.</p>
+    }
+  </div>
+</section>
+
+<section class="integrity" aria-labelledby="detection-rules-title">
+  <h2 id="detection-rules-title">Detection rules</h2>
+  @if (rules(); as items) {
+    <ul class="detection-rules">
+      @for (rule of items; track rule.id) {
+        <li>
+          <strong>{{ rule.title }}</strong>
+          <span
+            >{{ rule.severity }} · {{ rule.threshold }} failures in
+            {{ rule.windowMinutes }} minutes</span
+          >
+          <span
+            >Last alert
+            @if (rule.lastAlertAt; as at) {
+              <time [attr.datetime]="at">{{ at | date: "yyyy-MM-dd HH:mm:ss 'UTC'" : 'UTC' }}</time>
+            } @else {
+              Never
+            }
+          </span>
+        </li>
+      }
+    </ul>
+  } @else if (rulesError()) {
+    <p role="alert">Could not load detection rules.</p>
+  } @else {
+    <p role="status">Loading detection rules…</p>
+  }
+</section>
 
 <form class="filters" [formGroup]="form" (ngSubmit)="applyFilters()">
   <label>
@@ -52,81 +135,97 @@
   <p class="error" role="alert">{{ message }}</p>
 }
 
-@switch (state()) {
-  @case ('loading') {
-    <p class="state" role="status">Loading audit entries…</p>
-  }
-  @case ('error') {
-    <div class="state" role="alert">
-      <p>Could not load audit entries.</p>
-      <button type="button" (click)="load()">Try again</button>
+<section #results id="audit-entries" tabindex="-1" aria-label="Audit entry results">
+  @if (sequenceRange(); as range) {
+    <div class="focused-entry">
+      <span>Alert entries #{{ range.fromSeq }}–#{{ range.toSeq }}</span>
+      <a routerLink="/admin/audit-log">Clear alert range</a>
     </div>
   }
-  @case ('ready') {
-    @if (entries().length === 0) {
-      <p class="state" role="status">No audit entries match these filters.</p>
-    } @else {
-      <div class="table-region" role="region" aria-label="Audit entries" tabindex="0">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Sequence</th>
-              <th scope="col">Time (UTC)</th>
-              <th scope="col">Actor</th>
-              <th scope="col">Subject</th>
-              <th scope="col">IP address</th>
-              <th scope="col">Action</th>
-              <th scope="col">Description</th>
-              <th scope="col">Outcome</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (entry of entries(); track entry.seq) {
-              <tr>
-                <td>
-                  <button
-                    type="button"
-                    class="entry-link"
-                    (click)="openEntry(entry.seq, drawer)"
-                    [attr.aria-label]="'View entry ' + entry.seq"
-                  >
-                    #{{ entry.seq }}
-                  </button>
-                </td>
-                <td class="time">
-                  <time [attr.datetime]="entry.occurredAt">{{
-                    entry.occurredAt | date: 'yyyy-MM-dd HH:mm:ss.SSS' : 'UTC'
-                  }}</time>
-                </td>
-                <td>{{ entry.actor.login ?? entry.actor.type }}</td>
-                <td>{{ entry.subject.login ?? entry.subject.ref ?? '—' }}</td>
-                <td class="address">{{ entry.ip ?? '—' }}</td>
-                <td class="action">{{ entry.action }}</td>
-                <td class="description">{{ entry.description }}</td>
-                <td>
-                  <span class="badge" [class.failure]="entry.outcome === 'FAILURE'">{{
-                    entry.outcome === 'SUCCESS' ? 'Success' : 'Failure'
-                  }}</span>
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
+  @if (focusedSeq() !== null) {
+    <div class="focused-entry">
+      <span>Showing entry #{{ focusedSeq() }}</span>
+      <button type="button" (click)="clearFocusedEntry()">Clear entry filter</button>
+    </div>
+  }
+  @switch (state()) {
+    @case ('loading') {
+      <p class="state" role="status">Loading audit entries…</p>
+    }
+    @case ('error') {
+      <div class="state" role="alert">
+        <p>Could not load audit entries.</p>
+        <button type="button" (click)="load()">Try again</button>
       </div>
     }
-    @if (total() > 0) {
-      <nav class="pagination" aria-label="Audit log pages">
-        <span>{{ total() }} {{ total() === 1 ? 'entry' : 'entries' }} · Page {{ page() }}</span>
-        <div>
-          <button type="button" [disabled]="page() === 1" (click)="changePage(-1)">Previous</button>
-          <button type="button" [disabled]="page() * pageSize >= total()" (click)="changePage(1)">
-            Next
-          </button>
+    @case ('ready') {
+      @if (entries().length === 0) {
+        <p class="state" role="status">No audit entries match these filters.</p>
+      } @else {
+        <div class="table-region" role="region" aria-label="Audit entries" tabindex="0">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Sequence</th>
+                <th scope="col">Time (UTC)</th>
+                <th scope="col">Actor</th>
+                <th scope="col">Subject</th>
+                <th scope="col">IP address</th>
+                <th scope="col">Action</th>
+                <th scope="col">Description</th>
+                <th scope="col">Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (entry of entries(); track entry.seq) {
+                <tr>
+                  <td>
+                    <button
+                      type="button"
+                      class="entry-link"
+                      (click)="openEntry(entry.seq, drawer)"
+                      [attr.aria-label]="'View entry ' + entry.seq"
+                    >
+                      #{{ entry.seq }}
+                    </button>
+                  </td>
+                  <td class="time">
+                    <time [attr.datetime]="entry.occurredAt">{{
+                      entry.occurredAt | date: 'yyyy-MM-dd HH:mm:ss.SSS' : 'UTC'
+                    }}</time>
+                  </td>
+                  <td>{{ entry.actor.login ?? entry.actor.type }}</td>
+                  <td>{{ entry.subject.login ?? entry.subject.ref ?? '—' }}</td>
+                  <td class="address">{{ entry.ip ?? '—' }}</td>
+                  <td class="action">{{ entry.action }}</td>
+                  <td class="description">{{ entry.description }}</td>
+                  <td>
+                    <span class="badge" [class.failure]="entry.outcome === 'FAILURE'">{{
+                      entry.outcome === 'SUCCESS' ? 'Success' : 'Failure'
+                    }}</span>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
         </div>
-      </nav>
+      }
+      @if (total() > 0) {
+        <nav class="pagination" aria-label="Audit log pages">
+          <span>{{ total() }} {{ total() === 1 ? 'entry' : 'entries' }} · Page {{ page() }}</span>
+          <div>
+            <button type="button" [disabled]="page() === 1" (click)="changePage(-1)">
+              Previous
+            </button>
+            <button type="button" [disabled]="page() * pageSize >= total()" (click)="changePage(1)">
+              Next
+            </button>
+          </div>
+        </nav>
+      }
     }
   }
-}
+</section>
 
 <dialog #drawer (close)="clearDetail()" aria-labelledby="audit-entry-title">
   <header class="drawer-header">

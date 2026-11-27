@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Security settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+:root{color-scheme:dark;--muted:#A6AAB2;--line:rgba(255,255,255,.14)}
+*{box-sizing:border-box}
+body{margin:0;background:#161617;color:#fff;font-family:'Manrope',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#fff}
+:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.wide{font-family:'Archivo',sans-serif;font-stretch:125%}
+.screen{position:relative;overflow:hidden;margin:16px;border-radius:36px;border:1px solid rgba(255,255,255,.16);background:#000;min-height:868px}
+.dots{position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(rgba(255,255,255,.38) 1.4px,transparent 1.9px);background-size:30px 30px;-webkit-mask-image:radial-gradient(ellipse at 50% 100%,#000 0,transparent 78%);mask-image:radial-gradient(ellipse at 50% 100%,#000 0,transparent 78%)}
+.pill{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px;background:#fff;border-radius:22px}
+.pill a{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:0 16px;border-radius:16px;color:#000;text-decoration:none;font:700 12px/1 'Archivo',sans-serif;font-stretch:112%;letter-spacing:0.05em;text-transform:uppercase}
+.pill a:hover{background:#EDEDED}
+.pill a.on{background:#E3E3E3}
+.pill a.cta{background:#000;color:#fff}.pill a.cta:hover{background:#222}
+.card{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.14);border-radius:24px;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+.badge{display:inline-flex;align-items:center;gap:7px;padding:4px 11px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.06em;background:rgba(143,180,255,.14);color:#A9C4FF}
+.eyebrow{margin:0;display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 22px;border-radius:14px;border:1px solid transparent;font:700 15px 'Manrope',sans-serif;cursor:pointer;text-decoration:none}
+.btn-p{background:#fff;color:#000}.btn-p:hover{background:#E6E6E6}
+.btn-s{background:rgba(255,255,255,.06);color:#fff;border-color:rgba(255,255,255,.24)}.btn-s:hover{background:rgba(255,255,255,.13)}
+.in{width:100%;height:50px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:14px;background:rgba(255,255,255,.04);color:#fff;font:500 16px 'Manrope',sans-serif}
+.in:focus{border-color:#fff;outline:2px solid rgba(255,255,255,.45);outline-offset:0}
+.in[disabled]{background:rgba(255,255,255,.02);border-color:rgba(255,255,255,.12);color:#7C8089}
+.sw{appearance:none;-webkit-appearance:none;flex:none;width:48px;height:28px;margin:0;border-radius:999px;background:#3A3D42;position:relative;cursor:pointer}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .15s}
+.sw:checked{background:#fff}
+.sw:checked::after{left:23px;background:#000}
+.hint{margin:0;font-size:13px;line-height:1.55;color:var(--muted)}
+.lbl{font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase}
+.f{display:flex;flex-direction:column;gap:8px}
+.sec{margin:0;font-family:'Archivo',sans-serif;font-stretch:125%;font-size:20px;font-weight:600;text-transform:uppercase;letter-spacing:0.01em}
+</style>
+</helmet>
+<div class="screen">
+  <div class="dots" aria-hidden="true"></div>
+
+  <header style="position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;padding:28px 40px 8px">
+    <a href="Dashboard.dc.html" style="display:flex;align-items:center;gap:12px;text-decoration:none">
+      <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><g fill="#fff"><rect x="2" y="2" width="9" height="9" rx="2"/><circle cx="21" cy="6.5" r="3"/><circle cx="6.5" cy="21" r="3"/><rect x="16.5" y="16.5" width="9" height="9" rx="2"/></g></svg>
+      <span class="wide" style="font-weight:800;font-size:20px;letter-spacing:-0.01em">SecureDesk</span>
+    </a>
+    <nav class="pill" aria-label="Main">
+      <sc-for list="{{nav}}" as="item" hint-placeholder-count="7">
+        <a href="{{item.href}}" class="{{item.cls}}" aria-current="{{item.cur}}">{{item.label}}</a>
+      </sc-for>
+      <a href="Main.dc.html" class="cta">Log out
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg>
+      </a>
+    </nav>
+  </header>
+
+  <div role="status" style="position:relative;margin:16px 40px 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 20px;border-radius:18px;background:rgba(255,90,79,.12);border:1px solid rgba(255,90,79,.4);color:#FFB4AC;font-size:14px">
+    <span aria-hidden="true" style="width:10px;height:10px;border-radius:50%;background:#FF5A4F;box-shadow:0 0 14px 4px rgba(255,90,79,.7)"></span>
+    <strong style="font-weight:700">2 unacknowledged critical security events.</strong>
+    <a href="SecurityEvents.dc.html" style="color:#fff;font-weight:700">Review security events</a>
+  </div>
+
+  <main style="position:relative;padding:48px 40px 56px;display:flex;flex-direction:column;gap:32px;max-width:1000px">
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <p class="eyebrow"><span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:#fff"></span>Global rules</p>
+      <h1 class="wide" style="margin:0;font-weight:300;font-size:clamp(40px,5.4vw,80px);line-height:1;letter-spacing:-0.02em;text-transform:uppercase">Security settings</h1>
+      <p style="margin:0;font-size:17px;line-height:1.55;color:var(--muted);max-width:620px">Each change says when it takes effect.</p>
+    </div>
+
+    <form style="display:flex;flex-direction:column;gap:20px">
+
+      <section class="card" aria-labelledby="pw" style="padding:32px;display:flex;flex-direction:column;gap:28px">
+        <h2 id="pw" class="sec">Passwords</h2>
+
+        <div class="f" style="max-width:320px">
+          <label for="minlen" class="lbl">Minimum password length</label>
+          <input id="minlen" class="in" type="number" value="12" readonly>
+          <p class="hint">Characters, from 12 to 128. Applies to the next password change.</p>
+        </div>
+
+        <div style="display:flex;align-items:flex-start;gap:16px">
+          <input id="rejpd" class="sw" type="checkbox" role="switch" checked="{{no}}" readonly>
+          <div class="f" style="gap:4px">
+            <label for="rejpd" style="font-size:15px;font-weight:600">Reject passwords that contain the user's first or last name</label>
+            <p class="hint">Applies to the next password change.</p>
+          </div>
+        </div>
+
+        <div class="f" style="max-width:320px">
+          <label for="maxage" class="lbl">Maximum password age (days)</label>
+          <input id="maxage" class="in" type="number" disabled>
+          <label for="maxage-off" style="display:flex;align-items:center;gap:12px;min-height:44px;font-size:14px;font-weight:500">
+            <input id="maxage-off" type="checkbox" checked="{{yes}}" readonly style="width:20px;height:20px;accent-color:#ffffff">
+            Disabled
+          </label>
+          <p class="hint">From 1 to 3650 days. Passwords never expire while this is disabled. Applies at the next sign-in.</p>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="sess" style="padding:32px;display:flex;flex-direction:column;gap:28px">
+        <h2 id="sess" class="sec">Sessions</h2>
+        <div class="f" style="max-width:320px">
+          <label for="idle" class="lbl">Idle timeout (minutes)</label>
+          <input id="idle" class="in" type="number" value="15" readonly>
+          <p class="hint">Minutes without activity before a session ends, from 1 to 1440. Applies to open sessions at their next request.</p>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="lp" style="padding:32px;display:flex;flex-direction:column;gap:28px">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <h2 id="lp" class="sec">Login protection</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span class="badge">LOCK DURATION 15 MIN</span>
+            <span class="badge">ATTEMPT WINDOW 15 MIN</span>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:28px">
+          <div class="f">
+            <label for="a1" class="lbl">Failed attempts before an account is locked</label>
+            <input id="a1" class="in" type="number" value="5" readonly style="max-width:160px">
+            <p class="hint">Failed attempts for one login within the window, from 3 to 20.</p>
+          </div>
+          <div class="f">
+            <label for="a2" class="lbl">Failed attempts before an IP address is blocked</label>
+            <input id="a2" class="in" type="number" value="20" readonly style="max-width:160px">
+            <p class="hint">Failed attempts from one address within the window, whatever the logins, from 5 to 500.</p>
+          </div>
+          <div class="f">
+            <label for="a3" class="lbl">Distinct logins that signal password spraying</label>
+            <input id="a3" class="in" type="number" value="8" readonly style="max-width:160px">
+            <p class="hint">Different logins failed from one address within the window, from 3 to 50, raise a security event.</p>
+          </div>
+          <div class="f">
+            <label for="a4" class="lbl">Security event retention (days)</label>
+            <input id="a4" class="in" type="number" value="90" readonly style="max-width:160px">
+            <p class="hint">Days a security event is kept, from 7 to 365. Applies at the next clean-up.</p>
+          </div>
+        </div>
+      </section>
+
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <button type="submit" class="btn btn-p">
+          Save settings
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg>
+        </button>
+        <button type="button" class="btn btn-s">Discard changes</button>
+      </div>
+    </form>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const items = [
+      ['Dashboard', 'Dashboard.dc.html', false],
+      ['Password', '#', false],
+      ['Two-factor', '#', false],
+      ['Users', 'Users.dc.html', false],
+      ['Security settings', 'SecuritySettings.dc.html', true],
+      ['Address blocks', '#', false],
+      ['Security events', 'SecurityEvents.dc.html', false]
+    ];
+    return { nav: items.map(([label, href, on]) => ({ label, href, cls: on ? 'on' : '', cur: on ? 'page' : null })), yes: true, no: false };
+  }
+}
+</script>
+</body>
+</html>
