@@ -261,6 +261,7 @@ Existing routes stay at `/api/...` for the SPA. The documented, stable surface f
 - Retroactive ADRs: split Angular SPA and Next.js API; server-side revocable cookie sessions over JWT; Argon2id parameters; CSRF with Origin check plus HMAC double submit; SHA-256 chain with head anchor; process-local limiter (superseded later); SQLite choice (superseded by SD-104).
 - New ADRs written while building this module: PostgreSQL only with Testcontainers; Redis fail-closed policy; API keys limited to ticket scopes; webhook SSRF policy.
 - Link ADRs from the README and from the relevant backlog tasks.
+- Implemented in `docs/adr/`: 0001 to 0007 retroactive, 0008 (Redis), 0009 (API keys), 0010 (PostgreSQL) and 0012 (webhook SSRF) as `proposed` until their tasks land. 0011, 0013 and 0014 stay reserved for Module 5.
 
 **Acceptance criteria**
 
