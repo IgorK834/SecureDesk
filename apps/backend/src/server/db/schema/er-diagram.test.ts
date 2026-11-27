@@ -33,6 +33,7 @@ function parseDiagram(markdown: string): Diagram {
   for (const line of block.split('\n').map((l) => l.trim())) {
     const open = /^(\w+)\s*\{$/.exec(line);
     const relation = /^(\w+)\s+\S+--\S+\s+(\w+)\s*:\s*"(\w+)"$/.exec(line);
+    // eslint-disable-next-line security/detect-unsafe-regex -- Input is a checked-in diagram line.
     const attribute = /^(\w+)\s+(\w+)(?:\s+([A-Z]+(?:\s*,\s*[A-Z]+)*))?(?:\s+"([^"]*)")?$/.exec(
       line,
     );
