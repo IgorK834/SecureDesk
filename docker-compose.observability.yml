@@ -1,0 +1,28 @@
+services:
+  loki:
+    image: grafana/loki:3.7.10
+    command: -config.file=/etc/loki/securedesk.yml
+    ports:
+      - '127.0.0.1:3100:3100'
+    volumes:
+      - ./observability/loki.yml:/etc/loki/securedesk.yml:ro
+      - loki-data:/loki
+
+  grafana:
+    image: grafana/grafana:13.1.1
+    depends_on:
+      - loki
+    ports:
+      - '127.0.0.1:3300:3000'
+    environment:
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  loki-data:
+  grafana-data:
