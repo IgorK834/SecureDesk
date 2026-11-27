@@ -57,6 +57,7 @@ export interface SecurityEvent {
   acknowledgedBy: string | null;
   alertStatus: 'NONE' | 'PENDING' | 'SENT' | 'FAILED' | 'SUPPRESSED';
   alertAttemptedAt: string | null;
+  detection?: { title: string; firstSeq: number; lastSeq: number };
 }
 
 export interface SecurityEventPage {
@@ -67,6 +68,14 @@ export interface SecurityEventPage {
 }
 
 export type AuditOutcome = 'SUCCESS' | 'FAILURE';
+export interface DetectionRule {
+  id: string;
+  title: string;
+  severity: SecurityEventSeverity;
+  threshold: number;
+  windowMinutes: number;
+  lastAlertAt: string | null;
+}
 export type AuditExportFormat = 'csv' | 'jsonl';
 
 export interface AuditFilters {
@@ -75,6 +84,8 @@ export interface AuditFilters {
   outcome?: AuditOutcome;
   from?: string;
   to?: string;
+  fromSeq?: number;
+  toSeq?: number;
 }
 
 export interface AuditEntry {
@@ -100,6 +111,24 @@ export interface AuditPage {
   pageSize: number;
   actions: string[];
 }
+
+export interface AuditProblem {
+  seq: number | null;
+  id: string | null;
+  kind:
+    | 'HASH_MISMATCH'
+    | 'CHAIN_BROKEN'
+    | 'SEQUENCE_GAP'
+    | 'GENESIS_MISMATCH'
+    | 'MALFORMED_ROW'
+    | 'HEAD_MISMATCH';
+}
+
+export type AuditVerification = {
+  verifiedAt: string;
+  checkedEntries: number;
+  warnings: 'ANCHOR_MISSING'[];
+} & ({ status: 'INTACT' } | { status: 'TAMPERED'; firstProblem: AuditProblem });
 
 export interface HoneytokenStatus {
   id: string;
@@ -267,6 +296,10 @@ export class AdminApi {
     );
   }
 
+  listDetectionRules(): Observable<{ items: DetectionRule[] }> {
+    return this.http.get<{ items: DetectionRule[] }>('/api/admin/detection-rules');
+  }
+
   listAuditEntries(filters: AuditFilters, page: number, pageSize: number): Observable<AuditPage> {
     let params = new HttpParams().set('page', page).set('pageSize', pageSize);
     if (filters.user) params = params.set('user', filters.user);
@@ -274,11 +307,21 @@ export class AdminApi {
     if (filters.outcome) params = params.set('outcome', filters.outcome);
     if (filters.from) params = params.set('from', filters.from);
     if (filters.to) params = params.set('to', filters.to);
+    if (filters.fromSeq) params = params.set('fromSeq', filters.fromSeq);
+    if (filters.toSeq) params = params.set('toSeq', filters.toSeq);
     return this.http.get<AuditPage>(AUDIT_LOG_URL, { params });
   }
 
   getAuditEntry(seq: number): Observable<AuditEntry> {
     return this.http.get<AuditEntry>(`${AUDIT_LOG_URL}/${seq}`);
+  }
+
+  getAuditIntegrity(): Observable<{ verification: AuditVerification | null }> {
+    return this.http.get<{ verification: AuditVerification | null }>(`${AUDIT_LOG_URL}/integrity`);
+  }
+
+  verifyAuditIntegrity(): Observable<AuditVerification> {
+    return this.http.post<AuditVerification>(`${AUDIT_LOG_URL}/verify`, null);
   }
 
   exportAuditEntries(
