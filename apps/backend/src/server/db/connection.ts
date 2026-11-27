@@ -21,22 +21,25 @@ export function openConnection(dbPath: string): Database.Database {
   return sqlite;
 }
 
-export function createDb(dbPath: string, afterAuditCommit?: (db: AppDb) => void) {
+export function createDb(
+  dbPath: string,
+  afterAuditCommit?: (db: AppDb, entries: readonly schema.AuditLogRow[]) => void,
+) {
   const sqlite = openConnection(dbPath);
   const db = drizzle(sqlite, { schema });
   const transaction = db.transaction.bind(db);
   let active: AuditWrite | undefined;
   db.transaction = (run, config) => {
     const parent = active;
-    const write = { appended: false };
+    const write: AuditWrite = { entries: [] };
     active = write;
     try {
       const result = transaction((tx) => trackAuditWrite(tx, write, run), config);
-      if (write.appended) {
-        if (parent) parent.appended = true;
+      if (write.entries.length) {
+        if (parent) parent.entries.push(...write.entries);
         else if (!sqlite.inTransaction) {
           advanceAuditAnchor(db);
-          afterAuditCommit?.(db);
+          afterAuditCommit?.(db, write.entries);
         }
       }
       return result;
@@ -53,7 +56,7 @@ export type AppDb = ReturnType<typeof createDb>;
 export type AppTransaction = Parameters<Parameters<AppDb['transaction']>[0]>[0];
 
 interface AuditWrite {
-  appended: boolean;
+  entries: schema.AuditLogRow[];
 }
 const auditWrites = new WeakMap<AppTransaction, AuditWrite>();
 
@@ -65,15 +68,14 @@ function trackAuditWrite<T>(
   const savepoint = tx.transaction.bind(tx);
   auditWrites.set(tx, write);
   tx.transaction = (nested) => {
-    const child = { appended: false };
+    const child: AuditWrite = { entries: [] };
     const result = savepoint((inner) => trackAuditWrite(inner, child, nested));
-    if (child.appended) write.appended = true;
+    write.entries.push(...child.entries);
     return result;
   };
   return run(tx);
 }
 
-export function markAuditAppended(tx: AppTransaction): void {
-  const write = auditWrites.get(tx);
-  if (write) write.appended = true;
+export function markAuditAppended(tx: AppTransaction, row: schema.AuditLogRow): void {
+  auditWrites.get(tx)?.entries.push(row);
 }

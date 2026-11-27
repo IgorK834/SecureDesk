@@ -1,4 +1,6 @@
 import { verifyIfDue } from '../audit/scheduled-verification';
+import { queueLokiShipping } from '../audit/ship-loki';
+import { detectAfterAuditCommit } from '../detection/engine';
 import { MEMORY_DB, resolveDbPath } from './config';
 import { type AppDb, createDb } from './connection';
 
@@ -10,7 +12,13 @@ function getDb(): AppDb {
     const filename = resolveDbPath();
     globalForDb.__securedeskDb = createDb(
       filename,
-      filename === MEMORY_DB ? undefined : (db) => void verifyIfDue(db),
+      filename === MEMORY_DB
+        ? undefined
+        : (db, entries) => {
+            detectAfterAuditCommit(db, entries);
+            void verifyIfDue(db);
+            queueLokiShipping(db);
+          },
     );
   }
   return globalForDb.__securedeskDb;

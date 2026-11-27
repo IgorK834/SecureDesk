@@ -7,6 +7,7 @@ export async function register(): Promise<void> {
   const { assertAlertFileConfig } = await import('./server/alerts/file-alert-dispatcher');
   const { assertAuditAnchorConfig } = await import('./server/audit/anchor');
   const { auditVerifyIntervalMs } = await import('./server/audit/scheduled-verification');
+  const { lokiPushEndpoint } = await import('./server/audit/ship-loki');
   const { assertAuditSubjectConfig } = await import('./server/audit/subject');
   const { assertCaptchaConfig } = await import('./server/security/captcha');
   const { warnAboutClientIpConfiguration } = await import('./server/security/client-ip');
@@ -15,5 +16,9 @@ export async function register(): Promise<void> {
   assertAuditAnchorConfig();
   assertAlertFileConfig();
   auditVerifyIntervalMs();
+  lokiPushEndpoint();
   warnAboutClientIpConfiguration();
+  const { registerDetectionDispatchers } = await import('./server/detection/engine');
+  const { db } = await import('./server/db/client');
+  registerDetectionDispatchers(db);
 }
