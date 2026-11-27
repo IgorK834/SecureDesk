@@ -1,6 +1,7 @@
 import { defineConfig, globalIgnores } from 'eslint/config';
 import nextVitals from 'eslint-config-next/core-web-vitals';
 import nextTs from 'eslint-config-next/typescript';
+import security from 'eslint-plugin-security';
 
 const sqlRestrictions = [
   {
@@ -33,6 +34,28 @@ const eslintConfig = defineConfig([
     'build/**',
     'next-env.d.ts',
   ]),
+  {
+    files: ['**/*.{js,mjs,cjs,ts,tsx}'],
+    plugins: { security },
+    rules: {
+      'security/detect-child-process': 'error',
+      'security/detect-non-literal-fs-filename': 'error',
+      'security/detect-unsafe-regex': 'error',
+    },
+  },
+  {
+    files: [
+      '**/*.{test,spec}.{ts,tsx}', // Tests read repository fixtures and write to test-owned paths.
+      'scripts/audit-tamper-demo/demo.ts', // Local CLI copies files into its private demo directory.
+      'src/server/alerts/file-alert-dispatcher.ts', // Operator config; private paths and no-follow open.
+      'src/server/audit/anchor.ts', // Operator config; private paths and exclusive temporary write.
+      'src/server/db/connection.ts', // Parent directory of the configured SQLite database.
+      'src/server/db/reset.ts', // Local operator CLI checks targets before resetting a database.
+      'src/server/db/seeds/credentials-file.ts', // Local seed CLI writes credentials with mode 0600.
+      'src/server/security/private-file.ts', // Validates configured private paths with lstat and realpath.
+    ],
+    rules: { 'security/detect-non-literal-fs-filename': 'off' },
+  },
   {
     // Passwords, tokens and identifiers come from crypto.randomInt / randomBytes / randomUUID.
     // Math.random is predictable, so a secret built from it would be guessable.

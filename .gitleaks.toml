@@ -1,0 +1,34 @@
+title = "SecureDesk secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+# Only documented placeholder values in the environment template.
+condition = "AND"
+paths = ['^\.env\.example$']
+regexes = ['^replace-with-output-of-openssl-rand-base64-32$', '^1x0{20}AA$', '^1x0{32}AA$']
+
+[[allowlists]]
+# Identifier for a seeded ticket used by the ticket authorization tests.
+condition = "AND"
+paths = ['^apps/backend/src/app/api/tickets/tickets\.test\.ts$']
+regexes = ['^guest2ToEmployee1$']
+
+[[allowlists]]
+# Synthetic temporary password used by the admin user form test.
+condition = "AND"
+paths = ['^apps/frontend/src/app/features/admin-users/user-form\.component\.spec\.ts$']
+regexes = ['^Tmp-Secret-9xQ4zLm2$']
+
+[[allowlists]]
+# The generic API key detector interprets a duration in a scenario table as a value.
+condition = "AND"
+paths = ['^docs/course/backlog-module-4\.md$']
+regexes = ['^10-minute-old$']
+
+[[allowlists]]
+# The generic API key detector spans the empty API key and its numeric budget on the next line.
+condition = "AND"
+paths = ['^docs/course/backlog-module-6\.md$']
+regexes = ['^ABUSEIPDB_DAILY_BUDGET=800$']

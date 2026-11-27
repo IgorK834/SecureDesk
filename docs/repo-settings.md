@@ -52,14 +52,21 @@ workflows (see the CI tasks in [the Module 4 backlog](course/backlog-module-4.md
 the job name in the **Status checks that are required** box (for example `lint`; the list shows
 them as `CI / lint`):
 
-| Check                                                      | Added with              | Workflow                    | Status            |
-| ---------------------------------------------------------- | ----------------------- | --------------------------- | ----------------- |
-| `lint`, `typecheck`, `format`, `test`, `links`, `adr-lint` | CI workflow (SD-97)     | `.github/workflows/ci.yml`  | In the repository |
-| `e2e`                                                      | E2E in CI (SD-98)       | `.github/workflows/ci.yml`  | Not built yet     |
-| `CodeQL`, `gitleaks`                                       | Static analysis (SD-99) | `codeql.yml`, `secrets.yml` | Not built yet     |
+| Check                                                      | Added with              | Workflow                    |
+| ---------------------------------------------------------- | ----------------------- | --------------------------- |
+| `lint`, `typecheck`, `format`, `test`, `links`, `adr-lint` | CI workflow (SD-97)     | `.github/workflows/ci.yml`  |
+| `e2e`                                                      | E2E in CI (SD-98)       | `.github/workflows/ci.yml`  |
+| `CodeQL`, `gitleaks`                                       | Static analysis (SD-99) | `codeql.yml`, `secrets.yml` |
 
-A check can only be marked required after it has run once on the repository, so mark the six CI
-checks after the first run of the workflow, from this pull request or from `main`.
+Select the nine check names after GitHub Actions has reported them once. The `e2e` job runs
+Modules 1 to 3 with one worker, zero retries and a fresh SQLite database per suite. The `@slow`
+idle-timeout journey also runs on pushes to `main` and on the nightly schedule. Failed runs attach
+HTML reports, traces and videos under `playwright-diagnostics` for 14 days. To inspect a downloaded
+trace locally, run `npx playwright show-trace path/to/trace.zip`.
+
+When the browser suites regularly exceed eight minutes on GitHub Actions, run the suite groups in
+parallel and keep `e2e` as the aggregate required job. Give each shard its own
+`SECUREDESK_E2E_DIR`, which also isolates `E2E_DATABASE_PATH` until the PostgreSQL migration.
 
 The `test` job also publishes the coverage totals in the run summary and uploads the full report
 as the `coverage` artifact (kept 14 days). Coverage is enforced by the 80% gate inside
@@ -78,6 +85,13 @@ as the `coverage` artifact (kept 14 days). Coverage is enforced by the 80% gate 
 | Secret scanning                 | Enable                                                                                     |
 | Push protection                 | **Enable** (blocks a push that contains a detected secret)                                 |
 | Code scanning                   | Set up through the CodeQL workflow, not the default setup, so the query suite is versioned |
+
+Review first-run CodeQL results under **Security → Code scanning**. Record findings and dispositions
+in [Security scan triage](security-triage.md).
+
+To opt into staged secret scanning locally, install Gitleaks and set
+`git config --local core.hooksPath scripts/hooks`. If you already use a hooks directory, invoke
+`scripts/hooks/pre-commit` from your existing pre-commit hook instead.
 
 ```bash
 gh api -X PUT repos/IgorK834/SecureDesk/private-vulnerability-reporting

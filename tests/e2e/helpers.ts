@@ -5,7 +5,6 @@ import { expect, type Page } from '@playwright/test';
 const isolatedRun = process.env.SECUREDESK_E2E_DIR;
 export const E2E_DATABASE_PATH = path.resolve(isolatedRun ?? 'data', 'securedesk.e2e.sqlite');
 export const E2E_CREDENTIALS_PATH = path.resolve(isolatedRun ?? 'tests/e2e', '.credentials.json');
-export const MODULE_2_EVIDENCE_DIR = path.resolve('docs/report-evidence/module-2');
 
 export interface E2eCredential {
   login: string;
@@ -19,7 +18,8 @@ export interface E2eCredentials {
   guest: E2eCredential;
 }
 
-export const EVIDENCE_DIR = path.resolve('docs/report-evidence');
+export const EVIDENCE_DIR = path.resolve(isolatedRun ?? 'docs/report-evidence');
+export const MODULE_2_EVIDENCE_DIR = path.join(EVIDENCE_DIR, 'module-2');
 let loginAddressSuffix = 10;
 
 export function credentials(): E2eCredentials {

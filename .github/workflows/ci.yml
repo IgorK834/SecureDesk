@@ -2,18 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
+  schedule:
+    - cron: '23 2 * * *'
   workflow_dispatch:
 
 # Least privilege: every job only reads the repository. Widen per job if one ever needs more.
 permissions:
   contents: read
 
-# A new push to a pull request cancels the run it supersedes; runs on main always finish.
+# Keep each event separate, so a branch push cannot cancel its pull request checks.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}
 
 jobs:
   lint:
@@ -102,3 +103,47 @@ jobs:
         with:
           install: 'false'
       - run: npm run check:adr
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      E2E_RUN_DIR: /tmp/securedesk-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Read locked Playwright version
+        id: playwright
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - run: npx playwright install --with-deps chromium
+      - name: Run Modules 1 to 3
+        run: |
+          for module in module1 module2 module3; do
+            export SECUREDESK_E2E_DIR="$E2E_RUN_DIR/$module"
+            mkdir -p "$SECUREDESK_E2E_DIR"
+            npm run "test:e2e:$module"
+          done
+      - name: Run idle-timeout journey
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')
+        run: |
+          export SECUREDESK_E2E_DIR="$E2E_RUN_DIR/idle-timeout"
+          mkdir -p "$SECUREDESK_E2E_DIR"
+          npm run test:e2e -- --grep @slow
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-diagnostics
+          path: |
+            ${{ env.E2E_RUN_DIR }}/*/playwright-report/
+            ${{ env.E2E_RUN_DIR }}/*/playwright/
+          retention-days: 14
+          if-no-files-found: warn
