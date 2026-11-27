@@ -300,7 +300,7 @@ Build the Polish report with the repository's ReportLab script after generating 
 ```bash
 python3 scripts/build-report.py --module 3 --date 27.11.2026 \
   --subtitle 'Raport z realizacji modułu 3 | Audyt i wykrywanie incydentów' \
-  --source docs/report-module-3.md --output output/pdf/SecureDesk-raport-modul-3.pdf
+  --source docs/course/report-module-3.md --output output/pdf/SecureDesk-raport-modul-3.pdf
 ```
 
 ## Database

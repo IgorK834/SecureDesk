@@ -24,8 +24,17 @@ security-alerts.jsonl
 # Local scratch space
 .local/
 tests/e2e/.credentials.json
-output/bot-sim-report.json
-output/bot-sim-summary.md
+tmp/
+__pycache__/
+*.pyc
+
+# Generated reports and run output stay out of Git (attach finished reports to a release).
+# output/.gitkeep keeps the directory so the report and bot-sim scripts can write into it.
+output/*
+!output/.gitkeep
+
+# The course assignment PDF is not ours to publish
+**/Cyberbezpieczenstwo_*.pdf
 
 # OS / editors
 .DS_Store
