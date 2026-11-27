@@ -8,6 +8,8 @@ import {
   securityEvents,
 } from '../db/schema';
 import { NotFoundError } from '../http/errors';
+import { detectionAlertDetails } from '../detection/details';
+import { detectionRuleTitle } from '../detection/engine';
 import { clock } from '../time/clock';
 import { SECURITY_EVENTS, type SecurityEventType } from './events';
 
@@ -51,6 +53,7 @@ export interface SecurityEventDto {
   acknowledgedBy: string | null;
   alertStatus: (typeof ALERT_STATUSES)[number];
   alertAttemptedAt: string | null;
+  detection?: { title: string; firstSeq: number; lastSeq: number };
 }
 
 const EVENT_COLUMNS = {
@@ -85,6 +88,9 @@ function safeDetails(row: Pick<SafeEventRow, 'type' | 'details'>): Record<string
 
 /** Explicit public shape: attacker-controlled login and user-agent fields are never selected. */
 export function toSecurityEventDto(row: SafeEventRow): SecurityEventDto {
+  const details = safeDetails(row);
+  const detection =
+    row.type === 'DETECTION_ALERT' ? detectionAlertDetails.safeParse(details).data : undefined;
   return {
     id: row.id,
     type: row.type,
@@ -92,7 +98,14 @@ export function toSecurityEventDto(row: SafeEventRow): SecurityEventDto {
     occurredAt: row.occurredAt.toISOString(),
     ipKey: row.ipKey,
     subjectUserId: row.userId,
-    details: safeDetails(row),
+    details,
+    ...(detection && {
+      detection: {
+        title: detectionRuleTitle(detection.ruleId),
+        firstSeq: detection.firstSeq ?? detection.auditSeq,
+        lastSeq: detection.lastSeq ?? detection.auditSeq,
+      },
+    }),
     requestId: row.requestId,
     acknowledgedAt: row.acknowledgedAt?.toISOString() ?? null,
     acknowledgedBy: row.acknowledgedBy,
